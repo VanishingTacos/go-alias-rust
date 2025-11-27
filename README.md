@@ -3,31 +3,42 @@ Build Instructions
   shortcuts.json
   the content is the following format
   {
-    "alas": "url"
+    "alias": "url",
+    "alias": "url"
   }
 2. build rust app: cargo run
+or if you have to set privilages for the localhost port it uses (the run.sh file is committed into git repo if you want to just use that.)
+cargo build
+sudo setcap 'cap_net_bind_service=+ep' target/debug/go_service
+target/debug/go_service
+3. edit to add your own alias as localhost, i personally like go but you can use anything.
+file found at
+/etc/hosts
 
 
-USAGE:
-/
+## USAGE: In browser type localhost or whatever alas you may use for localhost/alias
+# /
 Mistype any shortcuts to see all your shortcuts
 
-/sql
+# /sql WIP
 
-have button to input a new connection that contains
+have form with submit button to input a new connection that contains
+- Nickname
 - Host
 - Database name
 - user
 - password
 then
 - securely save on encrypted file 
-- offer as selectable of all the connections and default to one.
+- offer as selection of all the connections and default to last used
 
-if there is a selected connection it will have a scrollable helper to show what tables are in db then a text input to input your sql to run. then there is a output table display under that. 
+Once selected and connected, redirect to a page that:
+- Left side has expandable selection of tables in that db with a search barat the top
+- top navigation bar that show connections in case we want to connect to a different database
+- on left of the expandable tables there is an input for sql with a run button below.
+- below the sql there is an output area for the sql when it runs. with a export to csv button
 
-then there is a export to csv under that
-
-/note
+# /note
 
 - if you paste a json or dict it will auto format
 - has a basic save button just historically

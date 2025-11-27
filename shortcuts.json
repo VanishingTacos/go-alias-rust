@@ -1,0 +1,18 @@
+{
+   
+    "email": "https://www.google.com/mail",
+    "calender": "https://calendar.google.com/calendar",
+    "drive": "https://drive.google.com/drive/",
+    "youtube": "https://www.youtube.com/",
+    "you": "https://www.youtube.com/",
+
+    "face": "https://www.facebook.com/",
+
+    "copilot": "https://copilot.microsoft.com/chats",
+
+    "ai": "http://localhost:3000/",
+
+    "github": "https://github.com/",
+    "git": "https://github.com/"
+
+}
