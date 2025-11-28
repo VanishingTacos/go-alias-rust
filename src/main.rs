@@ -21,10 +21,11 @@ use note::{note_get, note_post};
 use not_found::go; // catch‑all route
 
 static SHORTCUTS_FILE: &str = "shortcuts.json";
+static HIDDEN_SHORTCUTS_FILE: &str = "hidden-shortcuts.json";
 static NOTES_FILE: &str = "notes.json";
 
-fn load_shortcuts() -> std::io::Result<HashMap<String, String>> {
-    let data = fs::read_to_string(SHORTCUTS_FILE)?;
+fn load_shortcuts(path: &str) -> std::io::Result<HashMap<String, String>> {
+    let data = fs::read_to_string(path)?;
     let map: HashMap<String, String> = serde_json::from_str(&data)?;
     Ok(map)
 }
@@ -38,9 +39,14 @@ async fn index(state: Data<Arc<AppState>>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Load shortcuts
-    let shortcuts = load_shortcuts().unwrap_or_else(|e| {
+    
+    let shortcuts = load_shortcuts(SHORTCUTS_FILE).unwrap_or_else(|e| {
         eprintln!("Failed to load {SHORTCUTS_FILE}: {e}");
+        HashMap::new()
+    });
+
+    let hidden_shortcuts = load_shortcuts(HIDDEN_SHORTCUTS_FILE).unwrap_or_else(|e| {
+        eprintln!("Failed to load {HIDDEN_SHORTCUTS_FILE}: {e}");
         HashMap::new()
     });
 
@@ -55,6 +61,7 @@ async fn main() -> std::io::Result<()> {
     // Shared application state
     let state = Arc::new(AppState {
         shortcuts,
+        hidden_shortcuts,
         notes: Mutex::new(notes_vec),
         connections: Mutex::new(Vec::new()),
         last_results: Mutex::new(Vec::new()),

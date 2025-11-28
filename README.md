@@ -19,6 +19,8 @@ file found at
 ## USAGE: In browser type localhost or whatever alas you may use for localhost/alias
 # /
 Mistype any shortcuts to see all your shortcuts
+- has a table of all the shortcuts from the shortcuts.json
+- has a nav bar at top of all other tools with this tool
 
 # /sql WIP
 
@@ -41,5 +43,16 @@ Once selected and connected, redirect to a page that:
 # /note
 
 - if you paste a json or dict it will auto format
-- has a basic save button just historically
+- has a basic save button just historically store whatever notes you want
+- previews a note below and when clicked it loads it into the text section
+- delete button next to the note
+
+# /calc or /calculator WIP 
+
+- top bar asking for basic, scientific, gragh
+- calculator buttons are below the input output line of what is being input.
+- below is a history of what has been inputted.
+- graghing calculator mimics wolphramalpha
+
+# /paint
 

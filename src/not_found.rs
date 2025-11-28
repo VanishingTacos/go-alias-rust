@@ -72,13 +72,15 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
 /// Catch‑all route for shortcuts
 #[get("/{path}")]
 pub async fn go(path: web::Path<String>, state: Data<Arc<AppState>>) -> impl Responder {
-    if let Some(url) = state.shortcuts.get(path.as_str()) {
+    if let Some(url) = state.shortcuts.get(path.as_str())
+        .or_else(|| state.hidden_shortcuts.get(path.as_str()))
+    {
         HttpResponse::Found()
             .append_header(("Location", url.clone()))
             .finish()
     } else {
         HttpResponse::NotFound()
             .content_type("text/html; charset=utf-8")
-            .body(not_found_page(&state.shortcuts))
+            .body(not_found_page(&state.shortcuts)) // only visible ones shown
     }
 }
