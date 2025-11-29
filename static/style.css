@@ -140,3 +140,79 @@ ul li a:hover {
 #toggle-arrow:hover {
   color: #66ccff;
 }
+
+
+
+
+
+/* Base container for all tools/buttons */
+.tools {
+    display: flex;
+    justify-content: space-between; /* Pushes tool-buttons and add-shortcut to opposite ends */
+    align-items: center;
+    flex-wrap: wrap; 
+    margin: 10px; /* Provides separation from edge/content */
+}
+
+/* Container for the existing navigation links */
+.tool-buttons {
+    display: flex;
+    gap: 8px; /* Space between nav buttons */
+}
+
+/* Style for all navigation buttons */
+.nav-button {
+    margin: 0; /* Override default button margin */
+    padding: 8px 12px;
+    background: #444;
+    color: #eee;
+    border: 1px solid #555; /* Added border for definition */
+    border-radius: 4px;
+    cursor: pointer;
+}
+.nav-button:hover {
+    background: #666;
+}
+
+/* Style for the specific 'Add Shortcut' button */
+.add-button {
+    background-color: #007BFF; /* Bright blue for emphasis */
+    border-color: #007BFF;
+    color: white;
+}
+.add-button:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}
+
+
+/* --- Floating Modal Styles --- */
+
+/* Target the native dialog element */
+dialog {
+    /* Reset default dialog styling */
+    border: none;
+    padding: 0;
+    margin: auto;
+    background: transparent; /* Allows modal-content div to define background */
+}
+
+/* Target the content *inside* the dialog */
+dialog .modal-content {
+    /* *** MODIFIED: Changed background to pure black (#000) *** */
+    background-color: #000; 
+    color: #000;
+    padding: 20px;
+    /* Adjusted border color for slightly better contrast against pure black */
+    border: 1px solid #555; 
+    width: 90%; 
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px 0 rgba(0,0,0,0.7); /* Slightly stronger shadow for depth */
+}
+
+/* Target the backdrop (the dimmed area) */
+dialog::backdrop {
+    /* This is already black, just confirming the value */
+    background-color: rgba(0,0,0,0.8); /* You can increase transparency here if you want */
+}

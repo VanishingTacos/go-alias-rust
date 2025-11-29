@@ -5,6 +5,8 @@ use std::{fs, io::{self, Write}, sync::Arc};
 use serde_json;
 
 use crate::app_state::AppState;
+// Import the shared HTML wrapper function from the new module
+use crate::base_page::render_base_page;
 
 static NOTES_FILE: &str = "notes.json";
 
@@ -38,6 +40,7 @@ pub async fn note_post(
         notes.push(form.content.clone());
         save_notes(&notes).ok();
     }
+    // Render the updated page
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(render_note_page(&notes))
@@ -50,6 +53,7 @@ fn render_note_page(notes: &[String]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
+    // JavaScript for the textarea editor
     let js = r#"
 <script>
     const textarea = document.getElementById("editor");
@@ -75,10 +79,11 @@ fn render_note_page(notes: &[String]) -> String {
         setTimeout(() => {
             try {
                 let val = textarea.value.trim();
+                // Attempt basic JSON pretty printing on paste
                 if (val.startsWith("{") || val.startsWith("[")) {
                     let obj = JSON.parse(val);
                     textarea.value = JSON.stringify(obj, null, 2);
-                } else if (val.startsWith("{") && val.includes(":")) {
+                } else if (val.includes("{") && val.includes(":")) {
                     let jsonish = val.replace(/'/g, '"');
                     let obj = JSON.parse(jsonish);
                     textarea.value = JSON.stringify(obj, null, 2);
@@ -92,15 +97,9 @@ fn render_note_page(notes: &[String]) -> String {
 </script>
 "#;
 
-    format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8" />
-    <title>Quick Notes</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
+    // This is the custom content for the Notes page body.
+    let content = format!(
+        r#"
     <h1>Quick Notes</h1>
     <form method="POST" action="/note">
         <div class="editor-container">
@@ -114,9 +113,11 @@ fn render_note_page(notes: &[String]) -> String {
     {rendered_notes}
     </ul>
     {js}
-</body>
-</html>"#,
+    "#,
         rendered_notes = rendered_notes,
         js = js
-    )
+    );
+
+    // Use the reusable function to wrap the content with the base HTML and Nav Bar
+    render_base_page("Quick Notes", &content)
 }

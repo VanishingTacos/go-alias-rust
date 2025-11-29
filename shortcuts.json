@@ -1,18 +1,17 @@
 {
-   
-    "email": "https://www.google.com/mail",
-    "calender": "https://calendar.google.com/calendar",
-    "drive": "https://drive.google.com/drive/",
-    "youtube": "https://www.youtube.com/",
-    "you": "https://www.youtube.com/",
-
-    "face": "https://www.facebook.com/",
-
-    "copilot": "https://copilot.microsoft.com/chats",
-
-    "ai": "http://localhost:3000/",
-
-    "github": "https://github.com/",
-    "git": "https://github.com/"
-
+  "git": "https://github.com/",
+  "youtube": "https://www.youtube.com/",
+  "you": "https://www.youtube.com/",
+  "drive": "https://drive.google.com/drive/",
+  "copilot": "https://copilot.microsoft.com/chats",
+  "deals": "https://isthereanydeal.com/",
+  "calender": "https://calendar.google.com/calendar",
+  "ai": "http://localhost:3000/",
+  "gh": "https://github.com/",
+  "email": "https://www.google.com/mail",
+  "y": "https://www.youtube.com/",
+  "github": "https://github.com/",
+  "face": "https://www.facebook.com/",
+  "gmail": "https://www.google.com/mail",
+  "epic": "https://store.epicgames.com/en-US/"
 }

@@ -1,3 +1,5 @@
 {
-    "boa": "https://www.bankofamerica.com/online-banking/"
+    "boa": "https://www.bankofamerica.com/online-banking/",
+    "tailscale": "https://login.tailscale.com/admin/"
+
 }

@@ -56,3 +56,7 @@ Once selected and connected, redirect to a page that:
 
 # /paint
 
+## Elements
+
+# base_page.rs
+- has buttons to take us to the various tools that we will be building

@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::app_state::AppState;
+// Import render_base_page from the new centralized module
+use crate::base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
 
 /// Build grouped HTML table rows of shortcuts
 fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
@@ -14,6 +16,7 @@ fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
 
     let mut rows = String::new();
     let mut grouped_vec: Vec<_> = grouped.into_iter().collect();
+    // Sort by URL first
     grouped_vec.sort_by_key(|(url, _)| url.to_owned());
 
     for (url, mut keys) in grouped_vec {
@@ -31,30 +34,12 @@ fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
     }
     rows
 }
-     
-/// Render the 404 page with available shortcuts
-pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
+
+/// Renders the HTML table of shortcuts (reused by home and 404 pages).
+pub fn render_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
     let rows = grouped_shortcuts_table(shortcuts);
     format!(
-        r#"<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Shortcut Not Found</title>
-    <link rel="stylesheet" href="/static/style.css">
-  </head>
-  <body>
-    <h1>404 – Shortcut Not Found</h1>
-
-    <div class="tools">
-      <h2>Tools</h2>
-      <div class="tool-buttons">
-        <a href="/sql"><button>SQL Manager</button></a>
-        <a href="/note"><button>Notes</button></a>
-      </div>
-    </div>
-
-    <p>Here are the available shortcuts:</p>
+        r#"
     <table class="grid">
       <thead>
         <tr><th>Shortcut Keys</th><th>Destination URL</th></tr>
@@ -63,17 +48,44 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
         {rows}
       </tbody>
     </table>
-  </body>
-</html>"#,
+    "#,
         rows = rows
     )
+}
+
+/// Render the 404 page with available shortcuts
+pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
+    let table = render_shortcuts_table(shortcuts);
+    
+    // We modify the navigation bar content for the 404 page only
+    let nav_with_button = nav_bar_html()
+        .replace(r#"<div id="optional-button-placeholder"></div>"#, &render_add_shortcut_button());
+
+    let content = format!(
+        r#"
+    <h1>404 – Shortcut Not Found</h1>
+    {}
+    "#,
+        table
+    );
+    
+    // Use the imported render_base_page and replace the navigation content
+    render_base_page("Shortcut Not Found", &content)
+            // 1. Swap the navigation placeholder with the nav + button
+            .replace(&nav_bar_html(), &nav_with_button)
+            // 2. Append the modal just before </body>
+            .replace("</body>", &format!("{}</body>", render_add_shortcut_modal()))
 }
 
 /// Catch‑all route for shortcuts
 #[get("/{path}")]
 pub async fn go(path: web::Path<String>, state: Data<Arc<AppState>>) -> impl Responder {
-    if let Some(url) = state.shortcuts.get(path.as_str())
-        .or_else(|| state.hidden_shortcuts.get(path.as_str()))
+    // ** MODIFIED: Lock mutexes to read **
+    let shortcuts = state.shortcuts.lock().unwrap();
+    let hidden_shortcuts = state.hidden_shortcuts.lock().unwrap();
+
+    if let Some(url) = shortcuts.get(path.as_str())
+        .or_else(|| hidden_shortcuts.get(path.as_str()))
     {
         HttpResponse::Found()
             .append_header(("Location", url.clone()))
@@ -81,6 +93,6 @@ pub async fn go(path: web::Path<String>, state: Data<Arc<AppState>>) -> impl Res
     } else {
         HttpResponse::NotFound()
             .content_type("text/html; charset=utf-8")
-            .body(not_found_page(&state.shortcuts)) // only visible ones shown
+            .body(not_found_page(&shortcuts)) // only visible ones shown
     }
 }
