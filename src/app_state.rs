@@ -1,8 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use serde::{Serialize, Deserialize}; // ADDED: Import serde traits for Theme
+use serde::{Serialize, Deserialize};
 
 use crate::sql::DbConnection;
+
+// NEW STRUCT: Note
+// This struct stores both the subject and the content of a saved note.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Note {
+    pub subject: String,
+    pub content: String,
+}
 
 // Define the structure for a theme, which consists of CSS color variables
 #[derive(Serialize, Deserialize, Clone)]
@@ -22,7 +30,8 @@ pub struct AppState {
     pub shortcuts: Mutex<HashMap<String, String>>,
     pub hidden_shortcuts: Mutex<HashMap<String, String>>,
     pub work_shortcuts: Mutex<HashMap<String, String>>,
-    pub notes: Mutex<Vec<String>>,
+    // UPDATED: Use Vec<Note> instead of Vec<String>
+    pub notes: Mutex<Vec<Note>>,
 
     // THEME STATE
     pub current_theme: Mutex<Theme>, // The theme currently applied

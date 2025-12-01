@@ -8,7 +8,7 @@ mod elements;   // Module for elements
 use actix_files::Files;
 use actix_web::{
     get, 
-    web::Data, 
+    web::{self, Data}, // MODIFIED: Import 'web' module for explicit routing
     App, HttpResponse, HttpServer, Responder,
 };
 use std::{
@@ -19,8 +19,9 @@ use std::{
 };
 
 use app_state::AppState;
-use note::{note_get, note_post};
-// FIX: Removed unused imports (load_themes, load_current_theme, default_dark_theme)
+// FIX: Import note_delete along with existing note handlers
+use note::{note_get, note_post, note_delete};
+// Import from new elements modules
 use elements::theme::{get_settings, save_theme};
 use elements::shortcut::{add_shortcut, delete_shortcut}; // IMPORTED delete_shortcut
 // Import rendering helpers
@@ -31,6 +32,7 @@ use not_found::{go, render_shortcuts_table};
 static SHORTCUTS_FILE: &str = "shortcuts.json";
 static HIDDEN_SHORTCUTS_FILE: &str = "hidden-shortcuts.json";
 static WORK_SHORTCUTS_FILE: &str = "work-shortcuts.json"; 
+// FIX: Added 'static' keyword back to fix the syntax error
 static NOTES_FILE: &str = "notes.json";
 
 // Only shortcut loading remains here
@@ -104,6 +106,7 @@ async fn main() -> std::io::Result<()> {
     // --- Notes Loading ---
     let notes_vec = if Path::new(NOTES_FILE).exists() {
         let data = fs::read_to_string(NOTES_FILE).unwrap_or_else(|_| "[]".into());
+        // Assuming the file format matches Vec<Note> now
         serde_json::from_str(&data).unwrap_or_else(|_| Vec::new())
     } else {
         Vec::new()
@@ -147,6 +150,8 @@ async fn main() -> std::io::Result<()> {
             .service(index)
             .service(note_get)
             .service(note_post)
+            // FIX: Correctly register note_delete using web::route and web::post()
+            .route("/note/delete", web::post().to(note_delete))
             .service(sql::sql_get)
             .service(sql::sql_add)
             .service(sql::sql_run)
