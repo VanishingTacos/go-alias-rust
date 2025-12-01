@@ -201,7 +201,7 @@ dialog {
 dialog .modal-content {
     /* *** MODIFIED: Changed background to pure black (#000) *** */
     background-color: #000; 
-    color: #000;
+    color: #eee;
     padding: 20px;
     /* Adjusted border color for slightly better contrast against pure black */
     border: 1px solid #555; 
