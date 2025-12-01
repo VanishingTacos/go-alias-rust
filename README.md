@@ -54,9 +54,4 @@ Once selected and connected, redirect to a page that:
 - below is a history of what has been inputted.
 - graghing calculator mimics wolphramalpha
 
-# /paint
-
-## Elements
-
-# base_page.rs
-- has buttons to take us to the various tools that we will be building
+# /paint WIP
