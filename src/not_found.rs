@@ -3,12 +3,14 @@ use htmlescape::encode_minimal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// FIX: Changed to use crate::... imports, removed incorrect mod declarations
 use crate::app_state::AppState;
-// Import render_base_page from the new centralized module
+use crate::app_state::Theme; // Needed for not_found_page signature
+// Import rendering helpers
 use crate::base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
 
-/// Build grouped HTML table rows of shortcuts
-fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
+/// Builds HTML table rows of shortcuts, grouped by URL, with inline delete buttons.
+fn grouped_shortcuts_table_with_delete(shortcuts: &HashMap<String, String>) -> String {
     let mut grouped: HashMap<&str, Vec<&str>> = HashMap::new();
     for (key, url) in shortcuts.iter() {
         grouped.entry(url.as_str()).or_default().push(key.as_str());
@@ -23,9 +25,26 @@ fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
         keys.sort();
         let key_links = keys
             .iter()
-            .map(|k| format!("<a href=\"/{0}\">{0}</a>", encode_minimal(k)))
+            .map(|k| {
+                // Delete form for this specific key, styled inline next to the key link
+                let delete_form = format!(
+                    r#"
+                    <form action="/delete_shortcut" method="POST" style="display:inline; margin-left: 5px;" onsubmit="return confirm('Are you sure you want to delete shortcut: {}?');">
+                        <input type="hidden" name="key" value="{}">
+                        <button type="submit" class="delete-button" title="Delete {}" style="background: none; border: none; color: #ff6347; padding: 0; cursor: pointer; margin: 0; font-size: 10px; line-height: 1;">X</button>
+                    </form>
+                    "#,
+                    encode_minimal(k),
+                    encode_minimal(k),
+                    encode_minimal(k)
+                );
+                
+                // Group the link and the delete button, keeping them on one line
+                format!("<span style='white-space: nowrap;'><a href=\"/{0}\">{0}</a>{1}</span>", encode_minimal(k), delete_form)
+            })
             .collect::<Vec<_>>()
-            .join(" , ");
+            .join(" , "); // Join all key spans with a comma space
+
         rows.push_str(&format!(
             "<tr><td class=\"keys\">{}</td><td class=\"url\">{}</td></tr>",
             key_links,
@@ -36,8 +55,10 @@ fn grouped_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
 }
 
 /// Renders the HTML table of shortcuts (reused by home and 404 pages).
+// FIX: Made function public for external use (E0603)
 pub fn render_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
-    let rows = grouped_shortcuts_table(shortcuts);
+    // Use the grouping function with inline delete buttons
+    let rows = grouped_shortcuts_table_with_delete(shortcuts); 
     format!(
         r#"
     <table class="grid">
@@ -54,10 +75,10 @@ pub fn render_shortcuts_table(shortcuts: &HashMap<String, String>) -> String {
 }
 
 /// Render the 404 page with available shortcuts
-pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
+pub fn not_found_page(shortcuts: &HashMap<String, String>, current_theme: &Theme) -> String {
     let table = render_shortcuts_table(shortcuts);
     
-    // We modify the navigation bar content for the 404 page only
+    // Create the CUSTOM navigation bar with the Add Shortcut button injected
     let nav_with_button = nav_bar_html()
         .replace(r#"<div id="optional-button-placeholder"></div>"#, &render_add_shortcut_button());
 
@@ -70,7 +91,7 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
     );
     
     // Use the imported render_base_page and replace the navigation content
-    render_base_page("Shortcut Not Found", &content)
+    render_base_page("Shortcut Not Found", &content, current_theme)
             // 1. Swap the navigation placeholder with the nav + button
             .replace(&nav_bar_html(), &nav_with_button)
             // 2. Append the modal just before </body>
@@ -79,20 +100,29 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>) -> String {
 
 /// Catch‑all route for shortcuts
 #[get("/{path}")]
+// FIX: Made function public for external use (E0603)
 pub async fn go(path: web::Path<String>, state: Data<Arc<AppState>>) -> impl Responder {
-    // ** MODIFIED: Lock mutexes to read **
+    // Lock mutexes to read
     let shortcuts = state.shortcuts.lock().unwrap();
     let hidden_shortcuts = state.hidden_shortcuts.lock().unwrap();
+    let work_shortcuts = state.work_shortcuts.lock().unwrap(); 
+    let current_theme = state.current_theme.lock().unwrap(); // Get current theme
 
+    // Check all three maps for the shortcut
     if let Some(url) = shortcuts.get(path.as_str())
         .or_else(|| hidden_shortcuts.get(path.as_str()))
+        .or_else(|| work_shortcuts.get(path.as_str()))
     {
         HttpResponse::Found()
             .append_header(("Location", url.clone()))
             .finish()
     } else {
+        // Combine all *visible* shortcuts for display on the 404 page
+        let mut combined_shortcuts = shortcuts.clone();
+        combined_shortcuts.extend(work_shortcuts.clone());
+
         HttpResponse::NotFound()
             .content_type("text/html; charset=utf-8")
-            .body(not_found_page(&shortcuts)) // only visible ones shown
+            .body(not_found_page(&combined_shortcuts, &current_theme)) 
     }
 }

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::{fs, io::{self, Write}, sync::Arc};
 use serde_json;
 
-use crate::app_state::AppState;
+use crate::app_state::{AppState, Theme}; // ADDED: Import Theme struct
 // Import the shared HTML wrapper function from the new module
 use crate::base_page::render_base_page;
 
@@ -25,9 +25,13 @@ pub fn save_notes(notes: &[String]) -> io::Result<()> {
 #[get("/note")]
 pub async fn note_get(state: Data<Arc<AppState>>) -> impl Responder {
     let notes = state.notes.lock().unwrap().clone();
+    // ADDED: Lock the current theme state
+    let current_theme = state.current_theme.lock().unwrap();
+
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(render_note_page(&notes))
+        // MODIFIED: Pass the current_theme reference
+        .body(render_note_page(&notes, &current_theme))
 }
 
 #[post("/note")]
@@ -40,13 +44,19 @@ pub async fn note_post(
         notes.push(form.content.clone());
         save_notes(&notes).ok();
     }
+    
+    // ADDED: Lock the theme for rendering
+    let current_theme = state.current_theme.lock().unwrap();
+
     // Render the updated page
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(render_note_page(&notes))
+        // MODIFIED: Pass the current_theme reference
+        .body(render_note_page(&notes, &current_theme))
 }
 
-fn render_note_page(notes: &[String]) -> String {
+// MODIFIED: Function now accepts the current_theme argument
+fn render_note_page(notes: &[String], current_theme: &Theme) -> String {
     let rendered_notes = notes
         .iter()
         .map(|n| format!("<li>{}</li>", encode_minimal(n)))
@@ -54,6 +64,11 @@ fn render_note_page(notes: &[String]) -> String {
         .join("\n");
 
     // JavaScript for the textarea editor
+    // NOTE: Curly braces inside the JS string literal must be escaped {{ and }} 
+    // when using format! macro, but since this is defined outside the final 
+    // format! call, we only need to ensure they are escaped for the final 
+    // render_base_page call. Since the JS is passed as a standalone string 
+    // it will be correctly rendered in the final HTML string.
     let js = r#"
 <script>
     const textarea = document.getElementById("editor");
@@ -119,5 +134,6 @@ fn render_note_page(notes: &[String]) -> String {
     );
 
     // Use the reusable function to wrap the content with the base HTML and Nav Bar
-    render_base_page("Quick Notes", &content)
+    // MODIFIED: Pass current_theme
+    render_base_page("Quick Notes", &content, current_theme)
 }

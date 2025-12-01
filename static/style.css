@@ -1,13 +1,26 @@
+/* * DYNAMICALLY INJECTED THEME VARIABLES
+ * These variables are DEFINED by the Rust backend via an inline <style> block 
+ * in the HTML <head> based on the user's saved/current theme.
+ * This file (style.css) merely CONSUMES them using var(--name).
+ *
+ * NOTE: The explicit :root block with default values has been removed from this 
+ * file to ensure the dynamically injected styles always take precedence.
+ */
+
+
+/* -------------------------------------- */
+/* Global Styles (Using Variables) */
+/* -------------------------------------- */
 
 a {
-    color: #4da6ff;          /* bright, readable blue on dark background */
+    color: var(--link-color);
     text-decoration: none;
 }
 a:visited {
-    color: #b366ff;          /* softer purple for visited links */
+    color: var(--link-visited);
 }
 a:hover {
-    color: #66ccff;          /* lighter blue on hover */
+    color: var(--link-hover);
     text-decoration: underline;
 }
 
@@ -15,30 +28,35 @@ a:hover {
 body {
     font-family: sans-serif;
     margin: 0;
-    background: #2e2e2e;
-    color: #eee;
+    background: var(--primary-bg);
+    color: var(--text-color);
     display: flex;
     flex-direction: column;
     height: 100vh;
 }
 h1 { font-weight: normal; margin: 10px; }
+h2 { margin: 10px; }
+
+/* Form Styles */
 form {
-    flex: 1;
     display: flex;
     flex-direction: column;
     margin: 10px;
+    flex: 1; 
 }
+
+/* Editor (Notes/SQL) Styles */
 .editor-container {
     display: flex;
     flex: 1;
-    border: 1px solid #444;
-    background: #222;
+    border: 1px solid var(--border-color);
+    background: var(--secondary-bg);
     border-radius: 4px;
     overflow: hidden;
 }
 .line-numbers {
-    background: #333;
-    color: #aaa;
+    background: var(--border-color);
+    color: var(--text-color); 
     padding: 4px 6px;
     text-align: right;
     user-select: none;
@@ -49,8 +67,8 @@ form {
 }
 textarea {
     flex: 1;
-    background: #222;
-    color: #eee;
+    background: var(--secondary-bg);
+    color: var(--text-color);
     border: none;
     resize: none;
     padding: 4px;
@@ -60,17 +78,22 @@ textarea {
     outline: none;
     overflow: auto;
 }
+
+/* Button Styles */
 button {
     margin-top: 10px;
     padding: 6px 12px;
-    background: #444;
-    color: #eee;
+    background: var(--tertiary-bg); 
+    color: var(--text-color);
     border: none;
     cursor: pointer;
     align-self: flex-start;
+    border-radius: 4px;
+    transition: background 0.2s;
 }
-button:hover { background: #666; }
-h2 { margin: 10px; }
+button:hover { background: var(--border-color); } 
+
+/* List Styles (Notes) */
 ul {
     list-style: none;
     padding: 0 10px;
@@ -78,19 +101,21 @@ ul {
     max-height: 30vh;
 }
 li {
-    background: #3a3a3a;
+    background: var(--tertiary-bg);
     margin: 5px 0;
     padding: 8px;
     border-radius: 4px;
     white-space: pre-wrap;
+    border: 1px solid transparent;
 }
 
+/* Table Styles (Shortcuts) */
 table.grid {
     width: calc(100% - 20px);
     margin: 10px;
     border-collapse: collapse;
-    background: #222;
-    border: 1px solid #444;
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -98,121 +123,161 @@ table.grid {
 table.grid th, table.grid td {
     padding: 8px 12px;
     text-align: left;
-    border-bottom: 1px solid #444;
+    border-bottom: 1px solid var(--border-color);
     font-size: 14px;
     line-height: 1.4em;
 }
 
 table.grid th {
-    background: #333;
-    color: #eee;
+    background: var(--tertiary-bg);
+    color: var(--text-color);
     font-weight: normal;
 }
 
 table.grid tr:nth-child(even) td {
-    background: #2e2e2e;
+    background: var(--primary-bg); 
 }
 
 table.grid tr:hover td {
-    background: #444;
+    background: var(--border-color); 
 }
 
+/* Link Overrides */
 table.grid a {
-    color: #4da6ff;       
+    color: var(--link-color);
     text-decoration: none;
 }
 table.grid a:hover {
-    color: #66ccff;
+    color: var(--link-hover);
     text-decoration: underline;
 }
 
 ul li a {
-    color: #4da6ff;
+    color: var(--link-color);
 }
 ul li a:hover {
-    color: #66ccff;
+    color: var(--link-hover);
+}
+
+/* Navigation Bar */
+.tools {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: var(--secondary-bg);
+    border-bottom: 1px solid var(--border-color);
+}
+.tool-buttons, .right-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.nav-button {
+    margin: 0;
+    padding: 8px 15px;
 }
 
 #toggle-arrow {
-  color: #eee;
+  color: var(--text-color);
   transition: color 0.2s;
 }
 #toggle-arrow:hover {
-  color: #66ccff;
+  color: var(--link-hover);
 }
 
-
-
-
-
-/* Base container for all tools/buttons */
-.tools {
-    display: flex;
-    justify-content: space-between; /* Pushes tool-buttons and add-shortcut to opposite ends */
-    align-items: center;
-    flex-wrap: wrap; 
-    margin: 10px; /* Provides separation from edge/content */
+/* Modal Styles */
+#addShortcutModal {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--secondary-bg);
+    padding: 0;
+    color: var(--text-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
-
-/* Container for the existing navigation links */
-.tool-buttons {
-    display: flex;
-    gap: 8px; /* Space between nav buttons */
+.modal-content {
+    padding: 20px;
+    min-width: 300px;
 }
-
-/* Style for all navigation buttons */
-.nav-button {
-    margin: 0; /* Override default button margin */
-    padding: 8px 12px;
-    background: #444;
-    color: #eee;
-    border: 1px solid #555; /* Added border for definition */
-    border-radius: 4px;
+.close-btn {
+    color: var(--text-color);
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
     cursor: pointer;
 }
-.nav-button:hover {
-    background: #666;
+.close-btn:hover {
+    color: var(--link-hover);
+}
+.modal-form label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+.modal-form input[type="text"], 
+.modal-form input[type="url"] {
+    width: 95%;
+    padding: 8px;
+    margin-top: 5px;
+    border: 1px solid var(--border-color);
+    background: var(--primary-bg);
+    color: var(--text-color);
+    border-radius: 4px;
+}
+.form-actions {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+}
+.form-submit-btn {
+    align-self: unset;
 }
 
-/* Style for the specific 'Add Shortcut' button */
-.add-button {
-    background-color: #007BFF; /* Bright blue for emphasis */
-    border-color: #007BFF;
-    color: white;
-}
-.add-button:hover {
-    background-color: #0056b3;
-    border-color: #0056b3;
-}
-
-
-/* --- Floating Modal Styles --- */
-
-/* Target the native dialog element */
-dialog {
-    /* Reset default dialog styling */
-    border: none;
-    padding: 0;
-    margin: auto;
-    background: transparent; /* Allows modal-content div to define background */
-}
-
-/* Target the content *inside* the dialog */
-dialog .modal-content {
-    /* *** MODIFIED: Changed background to pure black (#000) *** */
-    background-color: #000; 
-    color: #eee;
+/* Settings Form Specific Styles */
+.settings-form {
+    flex: 0 1 auto; 
+    max-width: 800px;
+    margin: 20px auto;
     padding: 20px;
-    /* Adjusted border color for slightly better contrast against pure black */
-    border: 1px solid #555; 
-    width: 90%; 
-    max-width: 500px;
+    background: var(--secondary-bg);
     border-radius: 8px;
-    box-shadow: 0 4px 15px 0 rgba(0,0,0,0.7); /* Slightly stronger shadow for depth */
+    border: 1px solid var(--border-color);
+}
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px 30px;
+    margin-bottom: 20px;
+}
+.settings-grid label {
+    display: block;
+    margin-bottom: 5px;
+}
+.settings-grid input[type="color"] {
+    width: 100%;
+    height: 40px;
+    border: 1px solid var(--border-color); 
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+}
+.settings-grid input[type="text"],
+.settings-grid select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--primary-bg);
+    color: var(--text-color);
+    border-radius: 4px;
+    box-sizing: border-box;
 }
 
-/* Target the backdrop (the dimmed area) */
-dialog::backdrop {
-    /* This is already black, just confirming the value */
-    background-color: rgba(0,0,0,0.8); /* You can increase transparency here if you want */
+.theme-action-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+.theme-action-buttons button {
+    margin-top: 0;
 }
