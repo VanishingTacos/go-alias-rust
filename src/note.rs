@@ -4,25 +4,22 @@ use serde::Deserialize;
 use std::{fs, io::{self, Write}, sync::Arc};
 use serde_json;
 
-use crate::app_state::{AppState, Theme, Note}; // MODIFIED: Import Note struct
-// Import the shared HTML wrapper function from the new module
+use crate::app_state::{AppState, Theme, Note};
 use crate::base_page::render_base_page;
 
 static NOTES_FILE: &str = "notes.json";
 
 #[derive(Deserialize)]
 pub struct NoteForm {
-    pub subject: String, // ADDED: Subject line
+    pub subject: String,
     pub content: String,
 }
 
-// FIX: Renamed to _DeleteForm to silence 'dead_code' warning
 #[derive(Deserialize)]
 pub struct _DeleteForm {
-    pub note_index: usize, // The index of the note to delete
+    pub note_index: usize,
 }
 
-// MODIFIED: Accepts Vec<Note>
 pub fn save_notes(notes: &[Note]) -> io::Result<()> {
     let json = serde_json::to_string(notes)?;
     let mut f = fs::File::create(NOTES_FILE)?;
@@ -32,7 +29,6 @@ pub fn save_notes(notes: &[Note]) -> io::Result<()> {
 
 #[get("/note")]
 pub async fn note_get(state: Data<Arc<AppState>>) -> impl Responder {
-    // MODIFIED: notes is Vec<Note> now
     let notes = state.notes.lock().unwrap().clone();
     let current_theme = state.current_theme.lock().unwrap();
 
@@ -51,17 +47,13 @@ pub async fn note_post(
     let subject = form.subject.trim();
     let content = form.content.trim();
     
-    // Check if either subject or content is non-empty
     if subject.is_empty() && content.is_empty() {
-        // If empty, just redirect back
         return HttpResponse::SeeOther()
             .append_header(("Location", "/note"))
             .finish();
     }
     
-    // 1. Determine the subject (auto-generate if missing)
     let final_subject = if subject.is_empty() {
-        // Use the first 30 characters of content as the subject
         content.chars().take(30).collect::<String>().trim().to_string()
     } else {
         subject.to_string()
@@ -72,19 +64,15 @@ pub async fn note_post(
         content: content.to_string(),
     };
 
-    // 2. Overwrite Check / Update Logic: Check for existing note and perform update/overwrite
-    // This handles the user request for an "overwrite checker" by treating a subject match as an update.
     let existing_index = notes.iter().position(|n| n.subject == final_subject);
 
     match existing_index {
         Some(index) => {
-            // Overwrite: remove old note, insert new one (effectively updating in place)
             notes.remove(index);
             notes.insert(index, new_note);
             println!("Note updated: {}", final_subject);
         }
         None => {
-            // New note: push to the end
             notes.push(new_note);
             println!("New note saved: {}", final_subject);
         }
@@ -92,16 +80,13 @@ pub async fn note_post(
     
     save_notes(&notes).ok();
     
-    // Redirect back to the note page. This ensures the form data is cleared.
     HttpResponse::SeeOther()
         .append_header(("Location", "/note"))
         .finish()
 }
 
-// NEW HANDLER: POST /note/delete
 pub async fn note_delete(
     state: Data<Arc<AppState>>,
-    // FIX: Changed usage to _DeleteForm
     form: web::Form<_DeleteForm>,
 ) -> impl Responder {
     let mut notes = state.notes.lock().unwrap();
@@ -115,21 +100,17 @@ pub async fn note_delete(
         eprintln!("Attempted to delete note with out-of-bounds index: {}", index);
     }
 
-    // Redirect back to the note page
     HttpResponse::SeeOther()
         .append_header(("Location", "/note"))
         .finish()
 }
 
 
-// MODIFIED: Function accepts Vec<Note>
 fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
-    // Render saved notes as clickable list items
     let rendered_notes = notes
         .iter()
-        .enumerate() // ADDED: Enumerate to get the index for delete
+        .enumerate()
         .map(|(index, n)| {
-            // Store content, subject, and INDEX in data attributes.
             format!(
                 r#"
                 <li class="saved-note-item">
@@ -143,24 +124,27 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
                 </li>
                 "#,
                 index = index,
-                // Escape for use inside HTML attribute (data-content, data-subject)
                 subject = encode_minimal(&n.subject),
                 content = encode_minimal(&n.content),
-                // Use minimal escape for display subject
                 subject_escaped = encode_minimal(&n.subject),
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-    // JavaScript for the textarea editor, including the new load feature
     let js = r#"
 <script>
     const subjectInput = document.getElementById("subject");
     const textarea = document.getElementById("editor");
     const lineNumbers = document.getElementById("line-numbers");
     const savedNotesList = document.getElementById("saved-notes-list");
-    const saveButton = document.querySelector('button[type="submit"]');
+    const saveButton = document.getElementById("save-btn");
+    const fileInput = document.getElementById('file-input');
+    const previewContainer = document.getElementById('markdown-preview');
+    const editorContainer = document.querySelector('.editor-container');
+    const togglePreviewBtn = document.getElementById('toggle-preview-btn');
+
+    let isPreview = false;
 
     function updateLineNumbers() {
         const lines = textarea.value.split("\n").length;
@@ -176,79 +160,149 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         lineNumbers.scrollTop = textarea.scrollTop;
     });
 
-    textarea.addEventListener("input", updateLineNumbers);
+    textarea.addEventListener("input", () => {
+        updateLineNumbers();
+        resetSaveButton();
+    });
+    
+    subjectInput.addEventListener("input", resetSaveButton);
 
-    textarea.addEventListener("paste", function() {
-        setTimeout(() => {
-            try {
-                let val = textarea.value.trim();
-                // Attempt basic JSON pretty printing on paste
-                if (val.startsWith("{") || val.startsWith("[")) {
-                    let obj = JSON.parse(val);
-                    textarea.value = JSON.stringify(obj, null, 2);
-                } else if (val.includes("{") && val.includes(":")) {
-                    // Attempt to parse jsonish strings like {key:'val'}
-                    let jsonish = val.replace(/'/g, '"');
-                    let obj = JSON.parse(jsonish);
-                    textarea.value = JSON.stringify(obj, null, 2);
-                }
-            } catch (err) {}
-            updateLineNumbers();
-        }, 0);
+    function resetSaveButton() {
+        if (saveButton.textContent.startsWith("Update Note:")) {
+            saveButton.textContent = "Save or Update Note";
+        }
+    }
+
+    // --- Basic Markdown Parser (Client-side) ---
+    function renderMarkdown(text) {
+        // Simple regex-based parser for basic MD support
+        let html = text
+            .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+            .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+            .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+            .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+            .replace(/\*\*(.*)\*\*/gim, '<b>$1</b>')
+            .replace(/\*(.*)\*/gim, '<i>$1</i>')
+            .replace(/`([^`]+)`/gim, '<code>$1</code>')
+            .replace(/```([^`]+)```/gim, '<pre><code>$1</code></pre>')
+            .replace(/\[(.*?)\]\((.*?)\)/gim, "<a href='$2' target='_blank'>$1</a>")
+            .replace(/\n/gim, '<br />');
+        return html;
+    }
+
+    // --- Button Handlers ---
+
+    // Toggle Markdown Preview
+    togglePreviewBtn.addEventListener('click', (e) => {
+        e.preventDefault(); // Prevent form submit
+        isPreview = !isPreview;
+        
+        if (isPreview) {
+            previewContainer.innerHTML = renderMarkdown(textarea.value);
+            editorContainer.style.display = 'none';
+            previewContainer.style.display = 'block';
+            togglePreviewBtn.textContent = 'Edit Text';
+        } else {
+            editorContainer.style.display = 'flex';
+            previewContainer.style.display = 'none';
+            togglePreviewBtn.textContent = 'Preview Markdown';
+        }
     });
 
-    // NEW FEATURE: Load saved note into editor
+    // Open Local File
+    document.getElementById('open-file-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            textarea.value = e.target.result;
+            subjectInput.value = file.name; // Set subject as filename
+            updateLineNumbers();
+            resetSaveButton();
+            
+            // If currently previewing, update preview
+            if(isPreview) {
+                 previewContainer.innerHTML = renderMarkdown(textarea.value);
+            }
+        };
+        reader.readAsText(file);
+        // Reset input so same file can be selected again if needed
+        fileInput.value = '';
+    });
+
+    // Save/Download as File
+    document.getElementById('download-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        const text = textarea.value;
+        if (!text) {
+            alert("Note is empty!");
+            return;
+        }
+        
+        let name = subjectInput.value.trim();
+        if (!name) name = 'note.txt';
+        
+        // Ensure extension if missing
+        if (!name.includes('.')) {
+            name += '.txt';
+        }
+
+        const blob = new Blob([text], { type: 'text/plain' });
+        const anchor = document.createElement('a');
+        anchor.download = name;
+        anchor.href = window.URL.createObjectURL(blob);
+        anchor.target = '_blank';
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+    });
+
+
+    // --- History Logic ---
     savedNotesList.addEventListener('click', (event) => {
-        // Find the clickable subject span, ignoring the delete button/form
         const span = event.target.closest('.saved-note');
         if (span) {
-            // The browser automatically decodes the HTML-escaped data attributes
             const subject = span.getAttribute('data-subject');
             const content = span.getAttribute('data-content');
             
-            // 2. Populate the form fields (no confirmation, just overwrite)
             subjectInput.value = subject;
             textarea.value = content;
             
-            // 3. Update line numbers for the new content
             updateLineNumbers();
-            
-            // 4. Update the save button text to indicate update action
             saveButton.textContent = "Update Note: " + subject;
             
-            // 5. Give focus to the subject input for immediate editing
-            subjectInput.focus();
+            // If previewing, update preview immediately
+            if (isPreview) {
+                previewContainer.innerHTML = renderMarkdown(content);
+            } else {
+                subjectInput.focus();
+            }
         }
     });
-    
-    // Clear save button text when editing starts
-    subjectInput.addEventListener('input', () => {
-        if (saveButton.textContent.startsWith("Update Note:")) {
-            saveButton.textContent = "Save or Update Note";
-        }
-    });
-
-    textarea.addEventListener('input', () => {
-        if (saveButton.textContent.startsWith("Update Note:")) {
-            saveButton.textContent = "Save or Update Note";
-        }
-    });
-    
-    // The delete button submits a form directly to the backend.
-    // NOTE: Confirmation modals (like window.confirm) are disabled here as per instructions.
 
     updateLineNumbers();
 </script>
 "#;
 
-    // Add necessary CSS to style the subject input and list items, and the delete button
     let style = format!(
         r#"
 <style>
+    .toolbar {{
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+        align-items: center;
+    }}
     .subject-input {{
-        width: 100%;
+        flex-grow: 1;
         padding: 10px;
-        margin-bottom: 15px;
         border: 1px solid var(--border-color);
         background-color: var(--secondary-bg);
         color: var(--text-color);
@@ -262,7 +316,25 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         border-radius: 4px;
         overflow: hidden;
         margin-bottom: 15px;
+        min-height: 400px;
     }}
+    /* Markdown Preview Styles */
+    #markdown-preview {{
+        display: none; /* Hidden by default */
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 20px;
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+        min-height: 400px;
+        overflow-y: auto;
+        margin-bottom: 15px;
+    }}
+    #markdown-preview h1, #markdown-preview h2 {{ border-bottom: 1px solid var(--border-color); padding-bottom: 5px; }}
+    #markdown-preview code {{ background: #444; padding: 2px 5px; border-radius: 3px; }}
+    #markdown-preview pre {{ background: #333; padding: 10px; border-radius: 5px; overflow-x: auto; }}
+    #markdown-preview blockquote {{ border-left: 3px solid var(--link-color); margin-left: 0; padding-left: 10px; color: #aaa; }}
+
     .line-numbers {{
         background-color: var(--tertiary-bg);
         color: #777;
@@ -286,10 +358,10 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         resize: none;
         background-color: var(--secondary-bg);
         color: var(--text-color);
-        height: 300px; /* Fixed height for editor */
+        height: 400px; /* Fixed height for editor */
     }}
     
-    /* Styling for saved note list items */
+    /* Saved Notes List */
     .saved-note-item {{
         display: flex;
         align-items: center;
@@ -299,27 +371,17 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         border-radius: 4px;
         padding: 0 0 0 12px;
     }}
-
     .saved-note {{
         cursor: pointer;
         padding: 8px 0;
         font-weight: bold;
         transition: color 0.2s;
         flex-grow: 1;
-        /* Ensure the click area is the full subject span */
         display: block; 
     }}
-
-    .saved-note:hover {{
-        color: var(--link-hover);
-    }}
+    .saved-note:hover {{ color: var(--link-hover); }}
     
-    .delete-form {{
-        margin: 0;
-        line-height: 1;
-        flex-shrink: 0;
-    }}
-    
+    .delete-form {{ margin: 0; line-height: 1; flex-shrink: 0; }}
     .delete-button {{
         background: none;
         border: none;
@@ -332,31 +394,48 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         border-top-right-radius: 4px;
         border-bottom-right-radius: 4px;
         line-height: 1;
+        margin-top: 0; /* Override default button margin */
     }}
-    .delete-button:hover {{
-        background-color: #e00000; /* Red background on hover for delete */
-        color: white;
+    .delete-button:hover {{ background-color: #e00000; color: white; }}
+    .saved-note-item::marker {{ content: ""; }}
+    
+    /* Utility Buttons */
+    .utility-btn {{
+        margin-top: 0; /* Reset default */
+        margin-right: 5px;
+        background-color: var(--tertiary-bg);
+        border: 1px solid var(--border-color);
     }}
-    .saved-note-item::marker {{
-        content: ""; /* Remove default list markers */
-    }}
+    .utility-btn:hover {{ background-color: var(--border-color); }}
 </style>
         "#,
     );
 
-    // This is the custom content for the Notes page body.
     let content = format!(
         r#"
-    <h1>Quick Notes</h1>
+    <h1>Quick Notes & Markdown Editor</h1>
     <form method="POST" action="/note">
-        <input type="text" id="subject" name="subject" placeholder="Subject Line (optional)" value="" class="subject-input" />
+        <div class="toolbar">
+            <!-- Hidden file input for opening files -->
+            <input type="file" id="file-input" style="display: none;" accept=".txt,.md,.json,.rs,.js,.html">
+            
+            <button type="button" id="open-file-btn" class="utility-btn">📂 Open File</button>
+            <input type="text" id="subject" name="subject" placeholder="Subject / Filename" value="" class="subject-input" />
+            <button type="button" id="toggle-preview-btn" class="utility-btn">Preview Markdown</button>
+            <button type="button" id="download-btn" class="utility-btn">💾 Save to Disk</button>
+        </div>
+
         <div class="editor-container">
             <div class="line-numbers" id="line-numbers"></div>
-            <textarea id="editor" name="content"></textarea>
+            <textarea id="editor" name="content" placeholder="Type here or drop a file..."></textarea>
         </div>
-        <button type="submit">Save or Update Note</button>
+        
+        <div id="markdown-preview"></div>
+
+        <button type="submit" id="save-btn" style="width: 100%; padding: 10px; font-size: 1.1em;">Save or Update Note (Database)</button>
     </form>
-    <h2>Saved Notes</h2>
+    
+    <h2>Saved Notes (Database)</h2>
     <ul id="saved-notes-list">
     {rendered_notes}
     </ul>
@@ -366,7 +445,5 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         js = js
     );
 
-    // Use the reusable function to wrap the content with the base HTML and Nav Bar
-    // Prepend the custom style to the content
     render_base_page("Quick Notes", &format!("{}{}", style, content), current_theme)
 }

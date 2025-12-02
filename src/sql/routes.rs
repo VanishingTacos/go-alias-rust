@@ -22,6 +22,13 @@ struct SavedQuery {
 struct SaveQueryForm {
     query_name: String,
     sql: String,
+    connection: String, // Added to handle redirect back to view
+}
+
+#[derive(Deserialize)]
+struct DeleteQueryForm {
+    query_name: String,
+    connection: String, // Added to handle redirect back to view
 }
 
 fn load_queries() -> Vec<SavedQuery> {
@@ -34,6 +41,16 @@ fn load_queries() -> Vec<SavedQuery> {
 fn save_queries(queries: &[SavedQuery]) -> io::Result<()> {
     let data = serde_json::to_string_pretty(queries)?;
     fs::write(QUERIES_FILE, data)
+}
+
+// Helper to remove a query by name
+fn delete_query(name: &str) -> io::Result<()> {
+    let mut queries = load_queries();
+    if let Some(pos) = queries.iter().position(|q| q.name == name) {
+        queries.remove(pos);
+        save_queries(&queries)?;
+    }
+    Ok(())
 }
 // --- END: Saved Query Structures and Persistence ---
 
@@ -170,13 +187,62 @@ pub async fn sql_save(form: Form<SaveQueryForm>) -> impl Responder {
         eprintln!("Failed to save queries: {e}");
     }
     
-    // Redirect back to main SQL page
-    HttpResponse::Found().append_header(("Location", "/sql")).finish()
+    // Redirect back to the specific connection view
+    let location = format!("/sql/{}", form.connection);
+    HttpResponse::Found().append_header(("Location", location)).finish()
 }
+
+// --- NEW HANDLER: Delete SQL Query ---
+#[post("/sql/delete")]
+pub async fn sql_delete(form: Form<DeleteQueryForm>) -> impl Responder {
+    if let Err(e) = delete_query(&form.query_name) {
+        eprintln!("Failed to delete query: {e}");
+    }
+    
+    // Redirect back to the specific connection view
+    let location = format!("/sql/{}", form.connection);
+    HttpResponse::Found().append_header(("Location", location)).finish()
+}
+
+// --- Helper to format unix seconds to readable string (Simplified ISO-like) ---
+fn format_ts(seconds: i64) -> String {
+    // Constants for date calculation
+    const SECONDS_IN_MINUTE: i64 = 60;
+    const SECONDS_IN_HOUR: i64 = 3600;
+    const SECONDS_IN_DAY: i64 = 86400;
+    const DAYS_IN_400_YEARS: i64 = 146097;
+    const DAYS_IN_100_YEARS: i64 = 36524;
+    const DAYS_IN_4_YEARS: i64 = 1461;
+
+    let days_since_epoch = seconds / SECONDS_IN_DAY;
+    let mut second_of_day = seconds % SECONDS_IN_DAY;
+    if second_of_day < 0 { second_of_day += SECONDS_IN_DAY; }
+
+    let h = second_of_day / SECONDS_IN_HOUR;
+    let m = (second_of_day % SECONDS_IN_HOUR) / SECONDS_IN_MINUTE;
+    let s = second_of_day % SECONDS_IN_MINUTE;
+
+    // Shift to 0000-03-01 (Algorithm reference)
+    let days = days_since_epoch + 719468;
+    let era = if days >= 0 { days } else { days - 146096 } / DAYS_IN_400_YEARS;
+    let doe = days - era * DAYS_IN_400_YEARS;
+    let yoe = (doe - doe/DAYS_IN_100_YEARS + doe/DAYS_IN_400_YEARS - doe/146096) / 365; // Estimate year of era
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe/4 - yoe/100); // Day of year
+    let mp = (5 * doy + 2) / 153; // Month
+    let d = doy - (153 * mp + 2) / 5 + 1; // Day
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let yr = if mp < 10 { y } else { y + 1 };
+
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", yr, mo, d, h, m, s)
+}
+
 
 #[post("/sql/run")]
 pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Responder {
-    use sqlx::{Row, Column, postgres::PgPoolOptions, ValueRef, types::JsonValue}; 
+    // Import TypeInfo to check column types manually
+    use sqlx::{Row, Column, TypeInfo, postgres::PgPoolOptions, ValueRef, types::JsonValue}; 
+    use std::convert::TryInto; 
 
     let conn_opt = {
         let conns = state.connections.lock().unwrap();
@@ -221,20 +287,92 @@ pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Re
         let mut map_for_export: HashMap<String, String> = HashMap::new();
 
         let get_display_val = |row: &sqlx::postgres::PgRow, idx: usize| -> String {
-            if let Ok(s) = row.try_get::<String, usize>(idx) { return s; }
+            let col = row.column(idx);
+            let type_name = col.type_info().name();
+
+            // 1. Try standard string/text decoding first
+            if let Ok(s) = row.try_get::<String, usize>(idx) { 
+                return s; 
+            }
+
+            // 2. Handle specific types manually via raw bytes
+            if let Ok(raw_val) = row.try_get_raw(idx) {
+                if raw_val.is_null() {
+                    return "".to_string();
+                }
+
+                if let Ok(bytes) = raw_val.as_bytes() {
+                    match type_name {
+                        "TIMESTAMPTZ" | "TIMESTAMP" => {
+                            // 8 bytes: int64 microseconds since 2000-01-01
+                            if bytes.len() == 8 {
+                                let micros = i64::from_be_bytes(bytes.try_into().unwrap_or([0; 8]));
+                                // Convert Postgres epoch (2000-01-01) to Unix epoch
+                                let seconds = (micros / 1_000_000) + 946_684_800; 
+                                // Use the helper to format it to "YYYY-MM-DD HH:MM:SS"
+                                return format_ts(seconds);
+                            }
+                        },
+                        "DATE" => {
+                            // 4 bytes: int32 days since 2000-01-01
+                            if bytes.len() == 4 {
+                                let days = i32::from_be_bytes(bytes.try_into().unwrap_or([0; 4]));
+                                let seconds = (days as i64) * 86400 + 946_684_800;
+                                // Format showing only date part
+                                return format_ts(seconds).split_whitespace().next().unwrap_or("").to_string();
+                            }
+                        },
+                        "UUID" => {
+                            // 16 bytes
+                            if bytes.len() == 16 {
+                                let b = bytes;
+                                return format!("{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                                    b[0],b[1],b[2],b[3], b[4],b[5], b[6],b[7], b[8],b[9], b[10],b[11],b[12],b[13],b[14],b[15]);
+                            }
+                        },
+                        "BOOL" | "BOOL[]" => {
+                             // 1 byte
+                             if !bytes.is_empty() {
+                                 return if bytes[0] != 0 { "true".to_string() } else { "false".to_string() };
+                             }
+                        },
+                        "MONEY" => {
+                            // 8 bytes: int64 cents
+                            if bytes.len() == 8 {
+                                let cents = i64::from_be_bytes(bytes.try_into().unwrap_or([0; 8]));
+                                return format!("${:.2}", cents as f64 / 100.0);
+                            }
+                        },
+                        _ => {
+                            // Generic UTF-8 Fallback: If bytes are valid UTF-8, show them.
+                            // This handles CITEXT, NAME, BPCHAR, XML, etc.
+                            if let Ok(s) = std::str::from_utf8(bytes) {
+                                return s.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Try generic primitive decoding
+            if let Ok(i) = row.try_get::<i32, usize>(idx) { return i.to_string(); }
+            if let Ok(i) = row.try_get::<i16, usize>(idx) { return i.to_string(); }
             if let Ok(i) = row.try_get::<i64, usize>(idx) { return i.to_string(); }
+            
+            // Floats
             if let Ok(f) = row.try_get::<f64, usize>(idx) { return f.to_string(); }
+            
+            // Booleans
             if let Ok(b) = row.try_get::<bool, usize>(idx) { return b.to_string(); }
+            
+            // 4. Try JSON
             if let Ok(json) = row.try_get::<JsonValue, usize>(idx) {
                 let s = json.to_string();
                 return s.trim_matches('"').to_string();
             }
-            if let Ok(raw_value) = row.try_get_raw(idx) {
-                if !raw_value.is_null() {
-                    return "[Complex/Unreadable Data]".to_string();
-                }
-            }
-            "".to_string()
+
+            // Fallback with Type Name for debugging
+            format!("[Complex: {}]", type_name)
         };
 
         for (idx, col) in row.columns().iter().enumerate() {
@@ -296,14 +434,24 @@ pub async fn sql_export(state: Data<Arc<AppState>>) -> impl Responder {
 // Helper function to render the SQL query view page content
 fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::app_state::Theme) -> String {
     let saved_queries = load_queries();
+    let nickname_safe = htmlescape::encode_minimal(nickname);
     
     let saved_query_list = saved_queries.iter()
         .map(|q| {
             let sql_safe = htmlescape::encode_minimal(&q.sql);
             let name_safe = htmlescape::encode_minimal(&q.name);
+            
+            // FIX: Use standard format! with escaped quotes for stable compilation
             format!(
-                "<li class=\"saved-query-item\"><a href=\"#\" data-sql=\"{}\" data-name=\"{}\">{}</a></li>",
-                sql_safe, name_safe, name_safe
+                "<li class=\"saved-query-item\">\
+                    <a href=\"#\" data-sql=\"{}\" data-name=\"{}\" class=\"query-link\">{}</a>\
+                    <form method=\"POST\" action=\"/sql/delete\" style=\"display:inline;\">\
+                        <input type=\"hidden\" name=\"query_name\" value=\"{}\">\
+                        <input type=\"hidden\" name=\"connection\" value=\"{}\">\
+                        <button type=\"submit\" class=\"delete-btn\" title=\"Delete\">x</button>\
+                    </form>\
+                </li>",
+                sql_safe, name_safe, name_safe, name_safe, nickname_safe
             )
         })
         .collect::<Vec<_>>()
@@ -316,6 +464,13 @@ fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::ap
     #sidebar h2 { margin: 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); }
     #sidebar ul { list-style: none; padding: 0; margin: 5px 0 0 0; }
     #sidebar li { padding: 5px 0; cursor: pointer; }
+    
+    /* Updated sidebar styles for saved queries */
+    .saved-query-item { display: flex; justify-content: space-between; align-items: center; padding-right: 5px; }
+    .query-link { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 5px; }
+    .delete-btn { background: none; border: none; color: #ff6b6b; font-weight: bold; padding: 0 5px; margin: 0; cursor: pointer; }
+    .delete-btn:hover { color: #ff3b3b; background: rgba(255,0,0,0.1); border-radius: 3px; }
+    
     .sidebar-search input { width: 95%; padding: 5px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid var(--border-color); background: var(--primary-bg); color: var(--text-color); border-radius: 4px; }
     #sidebar ul a { display: block; }
     .query-save-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); }
@@ -345,6 +500,8 @@ fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::ap
         <form id="save-query-form" method="POST" action="/sql/save" class="query-save-form">
             <input type="text" id="query-name" name="query_name" placeholder="Name query to save" required>
             <input type="hidden" id="query-sql" name="sql">
+            <!-- Add hidden connection input so redirect works -->
+            <input type="hidden" name="connection" value="{nickname}">
             <button type="submit">Save Current Query</button>
         </form>
       </div>
@@ -427,8 +584,8 @@ fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::ap
           const filter = querySearchInput.value.toUpperCase();
           const listItems = savedQueriesList.getElementsByTagName('li');
           for (let i = 0; i < listItems.length; i++) {{
-              const itemText = listItems[i].textContent || listItems[i].innerText;
-              if (itemText.toUpperCase().indexOf(filter) > -1) {{ listItems[i].style.display = ''; }} else {{ listItems[i].style.display = 'none'; }}
+              const itemText = listItems[i].querySelector('.query-link').textContent || listItems[i].querySelector('.query-link').innerText;
+              if (itemText.toUpperCase().indexOf(filter) > -1) {{ listItems[i].style.display = 'flex'; }} else {{ listItems[i].style.display = 'none'; }}
           }}
       }}
 
@@ -437,7 +594,7 @@ fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::ap
 
       if (editor.value === "") {{ editor.value = "SELECT 1;"; }}
     </script>
-    "#, nickname = htmlescape::encode_minimal(nickname), table_list = table_list, saved_query_list = saved_query_list);
+    "#, nickname = nickname_safe, table_list = table_list, saved_query_list = saved_query_list);
 
     render_base_page(
         &format!("SQL View: {}", nickname),
@@ -488,8 +645,7 @@ pub async fn sql_view(path: web::Path<String>, state: web::Data<Arc<AppState>>) 
     let table_list = tables.iter().map(|t| {
         let safe = htmlescape::encode_minimal(t);
         format!("<li><a href=\"#\">{}</a></li>", safe)
-    }).collect::<Vec<_>>()
-    .join("\n");
+    }).collect::<Vec<_>>().join("\n");
         
     let current_theme = state.current_theme.lock().unwrap();
     HttpResponse::Ok()

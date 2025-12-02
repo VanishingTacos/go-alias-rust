@@ -147,8 +147,8 @@ async fn main() -> std::io::Result<()> {
             .service(sql::sql_run)
             .service(sql::sql_export)
             .service(sql::sql_view)
-            // FIX: Register the new save handler!
             .service(sql::sql_save) 
+            .service(sql::sql_delete) // FIX: This registers the delete handler!
             .service(Files::new("/static", "./static").prefer_utf8(true))
             .service(add_shortcut)      
             .service(delete_shortcut)   
