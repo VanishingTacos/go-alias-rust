@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+
 use crate::sql::DbConnection;
 
 pub fn find_connection<'a>(nick: &str, conns: &'a [DbConnection]) -> Option<&'a DbConnection> {
@@ -10,13 +10,13 @@ pub fn html_escape(s: &str) -> String {
     htmlescape::encode_minimal(s)
 }
 
-pub fn render_table(results: &[HashMap<String, String>]) -> String {
-    if results.is_empty() {
+// MODIFIED: Function signature updated to accept ordered headers and Vec<Vec<String>> data
+pub fn render_table(headers: &[String], results: &[Vec<String>]) -> String {
+    if results.is_empty() || headers.is_empty() {
         return "<pre>No output yet.</pre>".to_string();
     }
-    let mut headers: Vec<String> = results[0].keys().cloned().collect();
-    headers.sort();
-
+    
+    // Use the provided headers (already sorted by DB order)
     let thead = format!(
         "<tr>{}</tr>",
         headers.iter()
@@ -24,10 +24,11 @@ pub fn render_table(results: &[HashMap<String, String>]) -> String {
             .collect::<Vec<_>>()
             .join("")
     );
+    
+    // Iterate over the ordered rows
     let tbody = results.iter().map(|row| {
-        let tds = headers.iter()
-            .map(|h| html_escape(row.get(h).map(|v| v.as_str()).unwrap_or("")))
-            .map(|v| format!("<td>{}</td>", v))
+        let tds = row.iter()
+            .map(|v| format!("<td>{}</td>", html_escape(v)))
             .collect::<Vec<_>>()
             .join("");
         format!("<tr>{}</tr>", tds)

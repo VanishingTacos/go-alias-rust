@@ -37,6 +37,7 @@ pub fn nav_bar_html() -> String {
         <a href="/"><button class="nav-button">Home (Shortcuts)</button></a>
         <a href="/sql"><button class="nav-button">SQL Manager</button></a>
         <a href="/note"><button class="nav-button">Notes</button></a>
+        <a href="/calculator"><button class="nav-button">Calculator</button></a> <!-- NEW: Calculator Button -->
       </div>
       <div class="right-buttons">
         <div id="optional-button-placeholder"></div>

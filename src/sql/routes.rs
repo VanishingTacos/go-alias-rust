@@ -1,11 +1,117 @@
 use actix_web::{get, post, web::{self, Data, Form}, HttpResponse, Responder};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, fs, io};
+use serde::{Deserialize, Serialize};
 use crate::app_state::AppState;
+use crate::base_page::render_base_page;
 use crate::sql::{
     DbConnection, SqlForm, AddConnForm,
     find_connection, render_table,
     encrypt_and_save, load_and_decrypt,
 };
+
+// --- NEW: Saved Query Structures and Persistence ---
+const QUERIES_FILE: &str = "saved_queries.json";
+
+#[derive(Serialize, Deserialize, Clone)]
+struct SavedQuery {
+    name: String,
+    sql: String,
+}
+
+#[derive(Deserialize)]
+struct SaveQueryForm {
+    query_name: String,
+    sql: String,
+}
+
+fn load_queries() -> Vec<SavedQuery> {
+    fs::read_to_string(QUERIES_FILE)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_default()
+}
+
+fn save_queries(queries: &[SavedQuery]) -> io::Result<()> {
+    let data = serde_json::to_string_pretty(queries)?;
+    fs::write(QUERIES_FILE, data)
+}
+// --- END: Saved Query Structures and Persistence ---
+
+
+// Helper function to render the connection list page content
+fn render_connection_list(conns: &[DbConnection], current_theme: &crate::app_state::Theme) -> String {
+    let conn_links = conns.iter()
+        .map(|c| format!(
+            r#"<li><a href="/sql/{nick}">{nick} ({db}@{host})</a></li>"#,
+            nick = htmlescape::encode_minimal(&c.nickname),
+            db = htmlescape::encode_minimal(&c.db_name),
+            host = htmlescape::encode_minimal(&c.host)
+        ))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let content = format!(r#"
+    <div class="sql-connections-page">
+        <h1>SQL Connection Manager</h1>
+        
+        <div class="connection-form-container">
+            <h2>Add New / Update Connection</h2>
+            <form method="POST" action="/sql/add" class="connection-form">
+              <input name="nickname" placeholder="Nickname (e.g., prod_db)" required>
+              <input name="host" placeholder="Host (e.g., localhost:5432)" required>
+              <input name="db_name" placeholder="Database Name" required>
+              <input name="user" placeholder="User" required>
+              <input name="password" type="password" placeholder="Password" required>
+              <button type="submit">Save Connection</button>
+            </form>
+        </div>
+        
+        <div class="saved-connections-list">
+            <h2>Saved Connections</h2>
+            <ul>{conn_links}</ul>
+        </div>
+    </div>
+    <style>
+        .sql-connections-page {{
+            max-width: 800px;
+            margin: 0 auto;
+        }}
+        .connection-form-container {{
+            background-color: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }}
+        .connection-form input {{
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            background-color: var(--primary-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }}
+        .connection-form button {{
+            width: 100%;
+            padding: 10px;
+        }}
+        .saved-connections-list ul {{
+            list-style-type: none;
+            padding: 0;
+        }}
+        .saved-connections-list li {{
+            background-color: var(--tertiary-bg);
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }}
+    </style>
+    "#, conn_links = conn_links);
+    
+    render_base_page("SQL Connections", &content, current_theme)
+}
 
 
 #[get("/sql")]
@@ -17,38 +123,11 @@ pub async fn sql_get(state: Data<Arc<AppState>>) -> impl Responder {
         }
     }
     let conns = state.connections.lock().unwrap().clone();
+    let current_theme = state.current_theme.lock().unwrap();
 
-    let conn_links = conns.iter()
-        .map(|c| format!(
-            "<li><a href=\"/sql/{nick}\">{nick} ({db}@{host})</a></li>",
-            nick = htmlescape::encode_minimal(&c.nickname),
-            db = htmlescape::encode_minimal(&c.db_name),
-            host = htmlescape::encode_minimal(&c.host)
-        ))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let html = format!(r#"
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>SQL Connections</title>
-<link rel="stylesheet" href="/static/style.css"></head>
-<body>
-<h1>SQL Connections</h1>
-<form method="POST" action="/sql/add">
-  <input name="nickname" placeholder="Nickname" required>
-  <input name="host" placeholder="Host" required>
-  <input name="db_name" placeholder="Database Name" required>
-  <input name="user" placeholder="User" required>
-  <input name="password" type="password" placeholder="Password" required>
-  <button type="submit">Save Connection</button>
-</form>
-<h2>Saved Connections</h2>
-<ul>{conn_links}</ul>
-</body></html>
-"#, conn_links = conn_links);
-
-    HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(render_connection_list(&conns, &current_theme))
 }
 
 #[post("/sql/add")]
@@ -62,7 +141,7 @@ pub async fn sql_add(form: Form<AddConnForm>, state: Data<Arc<AppState>>) -> imp
     };
     {
         let mut conns = state.connections.lock().unwrap();
-        if let Some(idx) = conns.iter().position(|c| c.db_name == new_conn.db_name) {
+        if let Some(idx) = conns.iter().position(|c| c.nickname == new_conn.nickname) {
             conns[idx] = new_conn;
         } else {
             conns.push(new_conn);
@@ -74,9 +153,30 @@ pub async fn sql_add(form: Form<AddConnForm>, state: Data<Arc<AppState>>) -> imp
     HttpResponse::Found().append_header(("Location", "/sql")).finish()
 }
 
+#[post("/sql/save")]
+pub async fn sql_save(form: Form<SaveQueryForm>) -> impl Responder {
+    let mut queries = load_queries();
+    
+    if let Some(idx) = queries.iter().position(|q| q.name == form.query_name) {
+        queries[idx].sql = form.sql.clone();
+    } else {
+        queries.push(SavedQuery {
+            name: form.query_name.clone(),
+            sql: form.sql.clone(),
+        });
+    }
+    
+    if let Err(e) = save_queries(&queries) {
+        eprintln!("Failed to save queries: {e}");
+    }
+    
+    // Redirect back to main SQL page
+    HttpResponse::Found().append_header(("Location", "/sql")).finish()
+}
+
 #[post("/sql/run")]
 pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Responder {
-    use sqlx::{Row, Column, postgres::PgPoolOptions};
+    use sqlx::{Row, Column, postgres::PgPoolOptions, ValueRef, types::JsonValue}; 
 
     let conn_opt = {
         let conns = state.connections.lock().unwrap();
@@ -86,7 +186,7 @@ pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Re
     if conn_opt.is_none() {
         return HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
-            .body("<div style=\"color:#f88;\">Connection not found</div>");
+            .body(format!("<div style=\"color:var(--link-hover);\">Error: Connection '{}' not found.</div>", htmlescape::encode_minimal(&form.connection)));
     }
 
     let conn = conn_opt.unwrap();
@@ -96,7 +196,7 @@ pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Re
         Err(e) => {
             return HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
-                .body(format!("<div style=\"color:#f88;\">DB connect error: {}</div>", e));
+                .body(format!("<div style=\"color:var(--link-hover);\">DB connect error: {}</div>", htmlescape::encode_minimal(&e.to_string())));
         }
     };
 
@@ -105,30 +205,57 @@ pub async fn sql_run(form: Form<SqlForm>, state: Data<Arc<AppState>>) -> impl Re
         Err(e) => {
             return HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
-                .body(format!("<div style=\"color:#f88;\">Query error: {}</div>", e));
+                .body(format!("<div style=\"color:var(--link-hover);\">Query error: {}</div></div>", htmlescape::encode_minimal(&e.to_string())));
         }
     };
 
-    let mut results_vec: Vec<HashMap<String, String>> = Vec::new();
+    let headers: Vec<String> = rows.get(0)
+        .map(|row| row.columns().iter().map(|col| col.name().to_string()).collect())
+        .unwrap_or_default();
+
+    let mut data_rows: Vec<Vec<String>> = Vec::new();
+    let mut results_vec_for_export: Vec<HashMap<String, String>> = Vec::new();
+    
     for row in rows {
-        let mut map = HashMap::new();
-        for col in row.columns() {
+        let mut ordered_row_data: Vec<String> = Vec::new();
+        let mut map_for_export: HashMap<String, String> = HashMap::new();
+
+        let get_display_val = |row: &sqlx::postgres::PgRow, idx: usize| -> String {
+            if let Ok(s) = row.try_get::<String, usize>(idx) { return s; }
+            if let Ok(i) = row.try_get::<i64, usize>(idx) { return i.to_string(); }
+            if let Ok(f) = row.try_get::<f64, usize>(idx) { return f.to_string(); }
+            if let Ok(b) = row.try_get::<bool, usize>(idx) { return b.to_string(); }
+            if let Ok(json) = row.try_get::<JsonValue, usize>(idx) {
+                let s = json.to_string();
+                return s.trim_matches('"').to_string();
+            }
+            if let Ok(raw_value) = row.try_get_raw(idx) {
+                if !raw_value.is_null() {
+                    return "[Complex/Unreadable Data]".to_string();
+                }
+            }
+            "".to_string()
+        };
+
+        for (idx, col) in row.columns().iter().enumerate() {
             let name = col.name().to_string();
-            let val: Result<String, _> = row.try_get::<String, _>(name.as_str());
-            map.insert(name, val.unwrap_or_default());
+            let display_val = get_display_val(&row, idx);
+            ordered_row_data.push(display_val.clone());
+            map_for_export.insert(name, display_val);
         }
-        results_vec.push(map);
+        data_rows.push(ordered_row_data);
+        results_vec_for_export.push(map_for_export);
     }
 
     {
         let mut last = state.last_results.lock().unwrap();
-        *last = results_vec.clone();
+        *last = results_vec_for_export;
     }
 
-    let table = render_table(&results_vec);
+    let table = render_table(&headers, &data_rows);
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(table) // just the table HTML fragment
+        .body(table)
 }
 
 #[get("/sql/export")]
@@ -166,6 +293,158 @@ pub async fn sql_export(state: Data<Arc<AppState>>) -> impl Responder {
         .body(data)
 }
 
+// Helper function to render the SQL query view page content
+fn render_query_view(nickname: &str, table_list: &str, current_theme: &crate::app_state::Theme) -> String {
+    let saved_queries = load_queries();
+    
+    let saved_query_list = saved_queries.iter()
+        .map(|q| {
+            let sql_safe = htmlescape::encode_minimal(&q.sql);
+            let name_safe = htmlescape::encode_minimal(&q.name);
+            format!(
+                "<li class=\"saved-query-item\"><a href=\"#\" data-sql=\"{}\" data-name=\"{}\">{}</a></li>",
+                sql_safe, name_safe, name_safe
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let page_styles = r#"
+<style>
+    .sql-view-container { display: flex; height: calc(100vh - 70px); position: relative; }
+    #sidebar { width: 200px; background: var(--secondary-bg); color: var(--text-color); padding: 10px; overflow-y: auto; transition: width 0.3s, padding 0.3s; flex-shrink: 0; border-right: 1px solid var(--border-color); }
+    #sidebar h2 { margin: 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); }
+    #sidebar ul { list-style: none; padding: 0; margin: 5px 0 0 0; }
+    #sidebar li { padding: 5px 0; cursor: pointer; }
+    .sidebar-search input { width: 95%; padding: 5px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid var(--border-color); background: var(--primary-bg); color: var(--text-color); border-radius: 4px; }
+    #sidebar ul a { display: block; }
+    .query-save-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); }
+    .query-save-form input[type="text"] { width: 100%; padding: 5px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid var(--border-color); background: var(--primary-bg); color: var(--text-color); border-radius: 4px; }
+    #toggle-arrow { position: absolute; top: 10px; left: 200px; cursor: pointer; font-size: 18px; user-select: none; background: var(--tertiary-bg); color: var(--text-color); padding: 4px; border-radius: 4px; transition: left 0.3s, background-color 0.2s; line-height: 1; z-index: 10; }
+    #toggle-arrow:hover { background: var(--border-color); }
+    #main { flex: 1; display: flex; flex-direction: column; padding: 10px; }
+    #sql-form { display: flex; flex-direction: column; flex-grow: 1; }
+    .editor-container { flex: 1; min-height: 200px; margin-bottom: 10px; }
+    #sql-editor { height: 100%; }
+    .output { margin-top: 10px; flex-shrink: 0; max-height: 50%; overflow-y: auto; }
+    .action-buttons { display: flex; gap: 10px; flex-shrink: 0; }
+    .action-buttons button { margin-top: 0; }
+    .grid { width: 100%; }
+</style>
+"#;
+
+    let body_content = format!(r#"
+    <div class="sql-view-container">
+      <div id="sidebar">
+        <h2>Tables</h2>
+        <div class="sidebar-search"><input type="text" id="sidebar-search-input" placeholder="Search tables..."></div>
+        <ul id="table-list">{table_list}</ul>
+        <h2 style="margin-top: 20px;">Saved Queries</h2>
+        <div class="sidebar-search"><input type="text" id="query-search-input" placeholder="Search queries..."></div>
+        <ul id="saved-queries-list">{saved_query_list}</ul>
+        <form id="save-query-form" method="POST" action="/sql/save" class="query-save-form">
+            <input type="text" id="query-name" name="query_name" placeholder="Name query to save" required>
+            <input type="hidden" id="query-sql" name="sql">
+            <button type="submit">Save Current Query</button>
+        </form>
+      </div>
+      <span id="toggle-arrow">&#x25C0;</span>
+      <div id="main">
+        <form id="sql-form" method="POST" action="/sql/run">
+          <input type="hidden" name="connection" value="{nickname}">
+          <div class="editor-container">
+            <textarea id="sql-editor" name="sql" placeholder="SELECT * FROM table_name WHERE..."></textarea>
+          </div>
+          <div class="action-buttons">
+            <button type="submit">Run Query</button>
+            <a href="/sql/export" target="_blank"><button type="button">Save Results as CSV</button></a>
+          </div>
+        </form>
+        <div class="output" id="output"><pre>Click a table name or enter a query and press 'Run Query'.</pre></div>
+      </div>
+    </div>
+    <script>
+      const toggleArrow = document.getElementById('toggle-arrow');
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('main');
+      let collapsed = false;
+      const editor = document.getElementById('sql-editor');
+      const sidebarSearchInput = document.getElementById('sidebar-search-input');
+      const sidebarTableList = document.getElementById('table-list');
+      const querySearchInput = document.getElementById('query-search-input');
+      const savedQueriesList = document.getElementById('saved-queries-list');
+      const saveQueryForm = document.getElementById('save-query-form');
+      const queryNameInput = document.getElementById('query-name');
+      const querySqlInput = document.getElementById('query-sql');
+
+      toggleArrow.addEventListener('click', () => {{
+        if (!collapsed) {{
+          sidebar.style.width = '0px'; sidebar.style.padding = '0'; toggleArrow.innerHTML = '&#x25B6;'; toggleArrow.style.left = '0px'; mainContent.style.width = '100%'; collapsed = true;
+        }} else {{
+          sidebar.style.width = '200px'; sidebar.style.padding = '10px'; toggleArrow.innerHTML = '&#x25C0;'; toggleArrow.style.left = '200px'; mainContent.style.width = 'auto'; collapsed = false;
+        }}
+      }});
+      toggleArrow.style.left = sidebar.style.width;
+
+      const form = document.getElementById('sql-form');
+      const output = document.getElementById('output');
+      form.addEventListener('submit', async (e) => {{
+        e.preventDefault();
+        output.innerHTML = 'Loading...';
+        const formData = new FormData(form);
+        const body = new URLSearchParams(formData).toString();
+        const resp = await fetch('/sql/run', {{ method: 'POST', headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }}, body: body }});
+        const html = await resp.text();
+        output.innerHTML = html;
+        queryNameInput.value = '';
+      }});
+
+      sidebarTableList.addEventListener('click', (e) => {{
+          const target = e.target.closest('a');
+          if (target) {{ e.preventDefault(); const table_name = target.textContent; editor.value = "SELECT * FROM \\\"" + table_name + "\\\" LIMIT 100;"; }}
+      }});
+
+      savedQueriesList.addEventListener('click', (e) => {{
+          const target = e.target.closest('a');
+          if (target) {{ e.preventDefault(); const sql = target.getAttribute('data-sql'); const name = target.getAttribute('data-name'); editor.value = sql; queryNameInput.value = name; }}
+      }});
+
+      saveQueryForm.addEventListener('submit', (e) => {{
+          querySqlInput.value = editor.value;
+          if (queryNameInput.value.trim() === '') {{ e.preventDefault(); }}
+      }});
+
+      function filterSidebarTables() {{
+          const filter = sidebarSearchInput.value.toUpperCase();
+          const listItems = sidebarTableList.getElementsByTagName('li');
+          for (let i = 0; i < listItems.length; i++) {{
+              const itemText = listItems[i].textContent || listItems[i].innerText;
+              if (itemText.toUpperCase().indexOf(filter) > -1) {{ listItems[i].style.display = ''; }} else {{ listItems[i].style.display = 'none'; }}
+          }}
+      }}
+
+      function filterSavedQueries() {{
+          const filter = querySearchInput.value.toUpperCase();
+          const listItems = savedQueriesList.getElementsByTagName('li');
+          for (let i = 0; i < listItems.length; i++) {{
+              const itemText = listItems[i].textContent || listItems[i].innerText;
+              if (itemText.toUpperCase().indexOf(filter) > -1) {{ listItems[i].style.display = ''; }} else {{ listItems[i].style.display = 'none'; }}
+          }}
+      }}
+
+      sidebarSearchInput.addEventListener('keyup', filterSidebarTables);
+      querySearchInput.addEventListener('keyup', filterSavedQueries);
+
+      if (editor.value === "") {{ editor.value = "SELECT 1;"; }}
+    </script>
+    "#, nickname = htmlescape::encode_minimal(nickname), table_list = table_list, saved_query_list = saved_query_list);
+
+    render_base_page(
+        &format!("SQL View: {}", nickname),
+        &format!("{}{}", page_styles, body_content),
+        current_theme
+    )
+}
 
 #[get("/sql/{nickname}")]
 pub async fn sql_view(path: web::Path<String>, state: web::Data<Arc<AppState>>) -> impl Responder {
@@ -178,131 +457,42 @@ pub async fn sql_view(path: web::Path<String>, state: web::Data<Arc<AppState>>) 
     };
     let conn = match conn_opt {
         Some(c) => c,
-        None => return HttpResponse::BadRequest().body("Connection not found"),
-    };
-
-    let dsn = format!(
-        "postgres://{}:{}@{}/{}",
-        conn.user, conn.password, conn.host, conn.db_name
-    );
-    let pool = match PgPoolOptions::new().max_connections(5).connect(&dsn).await {
-        Ok(p) => p,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("DB connect error: {e}")),
-    };
-
-    // Fetch table names
-    let rows = match sqlx::query(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
-    )
-    .fetch_all(&pool)
-    .await {
-        Ok(r) => r,
-        Err(e) => {
-            return HttpResponse::InternalServerError()
-                .body(format!("Failed to list tables: {e}"))
+        None => {
+            let current_theme = state.current_theme.lock().unwrap();
+            let error_content = format!(r#"<h1>Error</h1><p>Connection '{nickname}' not found.</p>"#, nickname = htmlescape::encode_minimal(&nickname));
+            return HttpResponse::BadRequest().body(render_base_page("Error", &error_content, &current_theme));
         }
     };
 
-    let tables: Vec<String> = rows
-        .into_iter()
-        .filter_map(|row| row.try_get::<String, _>("table_name").ok())
-        .collect();
+    let dsn = format!("postgres://{}:{}@{}/{}", conn.user, conn.password, conn.host, conn.db_name);
+    let pool = match PgPoolOptions::new().max_connections(5).connect(&dsn).await {
+        Ok(p) => p,
+        Err(e) => {
+            let current_theme = state.current_theme.lock().unwrap();
+            let error_content = format!(r#"<h1>DB Connection Error</h1><pre class="error-message">Could not connect to {nickname}: {e}</pre>"#, nickname = htmlescape::encode_minimal(&nickname), e = htmlescape::encode_minimal(&e.to_string()));
+            return HttpResponse::InternalServerError().body(render_base_page("Connection Error", &error_content, &current_theme));
+        }
+    };
 
-    // Build table list
-    let table_list = tables
-        .iter()
-        .map(|t| {
-            let safe = htmlescape::encode_minimal(t);
-            format!(
-                "<li><a href=\"#\" onclick=\"document.getElementById('sql-editor').value='SELECT * FROM {} LIMIT 100;'\">{}</a></li>",
-                safe, safe
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rows = match sqlx::query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'").fetch_all(&pool).await {
+        Ok(r) => r,
+        Err(e) => {
+            let current_theme = state.current_theme.lock().unwrap();
+            let error_content = format!(r#"<h1>SQL Error</h1><pre class="error-message">Failed to list tables: {e}</pre>"#, e = htmlescape::encode_minimal(&e.to_string()));
+            return HttpResponse::InternalServerError().body(render_base_page("SQL Error", &error_content, &current_theme));
+        }
+    };
 
-    // Raw HTML template with placeholders
-    let mut html = r#"
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>{nickname}</title>
-<link rel="stylesheet" href="/static/style.css"></head>
-<body>
+    let tables: Vec<String> = rows.into_iter().filter_map(|row| row.try_get::<String, _>("table_name").ok()).collect();
 
-<div style="display:flex; height:100vh; position:relative;">
-  <!-- Sidebar -->
-  <div id="sidebar"
-       style="width:200px; background:#333; color:#eee; padding:10px; overflow-y:auto; transition: width 0.3s, padding 0.3s;">
-    <h2 style="margin:0;">Tables</h2>
-    <ul>{table_list}</ul>
-  </div>
-
-  <!-- Arrow toggle -->
-  <span id="toggle-arrow"
-        style="position:fixed; top:10px; left:200px; cursor:pointer; font-size:18px; user-select:none; background:#444; color:#eee; padding:4px; border-radius:4px; transition:left 0.3s;">
-    &#x25C0;
-  </span>
-
-  <!-- Main content -->
-  <div id="main" style="flex:1; display:flex; flex-direction:column; padding:10px;">
-    <form id="sql-form" method="POST" action="/sql/run">
-      <input type="hidden" name="connection" value="{nickname}">
-      <div class="editor-container">
-        <textarea id="sql-editor" name="sql" placeholder="SELECT * FROM ..."></textarea>
-      </div>
-      <button type="submit">Run</button>
-    </form>
-    <div class="output" id="output"></div>
-    <form method="GET" action="/sql/export">
-      <button type="submit">Save as CSV</button>
-    </form>
-  </div>
-</div>
-
-<script>
-  // Sidebar toggle
-  const toggleArrow = document.getElementById('toggle-arrow');
-  const sidebar = document.getElementById('sidebar');
-  let collapsed = false;
-
-  toggleArrow.addEventListener('click', () => {
-    if (!collapsed) {
-      sidebar.style.width = '0px';
-      sidebar.style.padding = '0';
-      toggleArrow.innerHTML = '&#x25B6;'; // ►
-      toggleArrow.style.left = '0px';
-      collapsed = true;
-    } else {
-      sidebar.style.width = '200px';
-      sidebar.style.padding = '10px';
-      toggleArrow.innerHTML = '&#x25C0;'; // ◀
-      toggleArrow.style.left = '200px';
-      collapsed = false;
-    }
-  });
-
-  // AJAX form submit
-  const form = document.getElementById('sql-form');
-  const output = document.getElementById('output');
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const formData = new FormData(form);
-    const resp = await fetch('/sql/run', { method: 'POST', body: formData });
-    const html = await resp.text();
-    output.innerHTML = html;
-  });
-</script>
-
-</body>
-</html>
-"#.to_string();
-
-    // Replace placeholders
-    html = html.replace("{nickname}", &htmlescape::encode_minimal(&nickname));
-    html = html.replace("{table_list}", &table_list);
-
+    let table_list = tables.iter().map(|t| {
+        let safe = htmlescape::encode_minimal(t);
+        format!("<li><a href=\"#\">{}</a></li>", safe)
+    }).collect::<Vec<_>>()
+    .join("\n");
+        
+    let current_theme = state.current_theme.lock().unwrap();
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(html)
+        .body(render_query_view(&nickname, &table_list, &current_theme))
 }

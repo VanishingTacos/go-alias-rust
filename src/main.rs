@@ -4,11 +4,12 @@ mod sql;        // now a folder with models, helpers, routes, crypto
 mod not_found;  // 404 page module
 mod base_page;  // New centralized module for base page helpers
 mod elements;   // Module for elements
+mod calculator; // NEW: Module for the calculator page
 
 use actix_files::Files;
 use actix_web::{
     get, 
-    web::{self, Data}, // MODIFIED: Import 'web' module for explicit routing
+    web::{self, Data}, 
     App, HttpResponse, HttpServer, Responder,
 };
 use std::{
@@ -19,20 +20,16 @@ use std::{
 };
 
 use app_state::AppState;
-// FIX: Import note_delete along with existing note handlers
 use note::{note_get, note_post, note_delete};
-// Import from new elements modules
+use calculator::calculator_get;
 use elements::theme::{get_settings, save_theme};
-use elements::shortcut::{add_shortcut, delete_shortcut}; // IMPORTED delete_shortcut
-// Import rendering helpers
+use elements::shortcut::{add_shortcut, delete_shortcut}; 
 use base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
-// Import other necessary rendering helpers from not_found
 use not_found::{go, render_shortcuts_table}; 
 
 static SHORTCUTS_FILE: &str = "shortcuts.json";
 static HIDDEN_SHORTCUTS_FILE: &str = "hidden-shortcuts.json";
 static WORK_SHORTCUTS_FILE: &str = "work-shortcuts.json"; 
-// FIX: Added 'static' keyword back to fix the syntax error
 static NOTES_FILE: &str = "notes.json";
 
 // Only shortcut loading remains here
@@ -46,7 +43,7 @@ fn load_shortcuts(path: &str) -> std::io::Result<HashMap<String, String>> {
 async fn index(state: Data<Arc<AppState>>) -> impl Responder {
     let shortcuts = state.shortcuts.lock().unwrap();
     let work_shortcuts = state.work_shortcuts.lock().unwrap(); 
-    let current_theme = state.current_theme.lock().unwrap(); // Get current theme
+    let current_theme = state.current_theme.lock().unwrap(); 
 
     // Combine all *visible* shortcuts for display on the home page
     let mut combined_shortcuts = shortcuts.clone();
@@ -66,17 +63,11 @@ async fn index(state: Data<Arc<AppState>>) -> impl Responder {
         table_html
     );
 
-    // The content itself does not include the modal
     let full_page_content = content;
-
-    // 2. Render the base page (which includes the *basic* navigation bar content).
     let html_output = render_base_page("Home - Shortcuts List", &full_page_content, &current_theme);
     
-    // 3. Perform the replacements on the final output:
     let final_html = html_output
-        // A. Swap the basic navigation bar with the one that includes the button.
         .replace(&nav_bar_html(), &nav_with_button)
-        // B. Append the modal just before </body>.
         .replace("</body>", &format!("{}</body>", render_add_shortcut_modal()));
 
     HttpResponse::Ok()
@@ -106,7 +97,6 @@ async fn main() -> std::io::Result<()> {
     // --- Notes Loading ---
     let notes_vec = if Path::new(NOTES_FILE).exists() {
         let data = fs::read_to_string(NOTES_FILE).unwrap_or_else(|_| "[]".into());
-        // Assuming the file format matches Vec<Note> now
         serde_json::from_str(&data).unwrap_or_else(|_| Vec::new())
     } else {
         Vec::new()
@@ -150,19 +140,21 @@ async fn main() -> std::io::Result<()> {
             .service(index)
             .service(note_get)
             .service(note_post)
-            // FIX: Correctly register note_delete using web::route and web::post()
+            .service(calculator_get) 
             .route("/note/delete", web::post().to(note_delete))
             .service(sql::sql_get)
             .service(sql::sql_add)
             .service(sql::sql_run)
             .service(sql::sql_export)
-            .service(sql::sql_view) 
+            .service(sql::sql_view)
+            // FIX: Register the new save handler!
+            .service(sql::sql_save) 
             .service(Files::new("/static", "./static").prefer_utf8(true))
-            .service(add_shortcut)      // POST /add_shortcut
-            .service(delete_shortcut)   // NEW: POST /delete_shortcut
-            .service(get_settings)      // GET /settings
-            .service(save_theme)        // POST /save_theme
-            .service(go) // catch‑all route
+            .service(add_shortcut)      
+            .service(delete_shortcut)   
+            .service(get_settings)      
+            .service(save_theme)        
+            .service(go) 
     })
     .bind(("0.0.0.0", 80))?
     .run()
