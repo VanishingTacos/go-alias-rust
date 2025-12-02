@@ -22,7 +22,7 @@ Mistype any shortcuts to see all your shortcuts
 - has a table of all the shortcuts from the shortcuts.json
 - has a nav bar at top of all other tools with this tool
 
-# /sql WIP
+# /sql
 
 have form with submit button to input a new connection that contains
 - Nickname
@@ -34,24 +34,21 @@ then
 - securely save on encrypted file 
 - offer as selection of all the connections and default to last used
 
-Once selected and connected, redirect to a page that:
-- Left side has expandable selection of tables in that db with a search barat the top
-- top navigation bar that show connections in case we want to connect to a different database
-- on left of the expandable tables there is an input for sql with a run button below.
-- below the sql there is an output area for the sql when it runs. with a export to csv button
-
 # /note
 
 - if you paste a json or dict it will auto format
 - has a basic save button just historically store whatever notes you want
 - previews a note below and when clicked it loads it into the text section
 - delete button next to the note
+- has a way to send as a composed message to google
+- be able to open .txt and .md files and preview .md files
 
-# /calc or /calculator WIP 
+# /calc or /calculator
 
-- top bar asking for basic, scientific, gragh
+- top bar asking for basic, scientific
 - calculator buttons are below the input output line of what is being input.
 - below is a history of what has been inputted.
-- graghing calculator mimics wolphramalpha
 
-# /paint WIP
+# /paint
+
+- basic paint functionality
