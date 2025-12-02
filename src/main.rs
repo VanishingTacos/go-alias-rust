@@ -5,6 +5,7 @@ mod not_found;  // 404 page module
 mod base_page;  // New centralized module for base page helpers
 mod elements;   // Module for elements
 mod calculator; // NEW: Module for the calculator page
+mod paint;      // NEW: Module for the paint tool
 
 use actix_files::Files;
 use actix_web::{
@@ -22,6 +23,7 @@ use std::{
 use app_state::AppState;
 use note::{note_get, note_post, note_delete};
 use calculator::calculator_get;
+use paint::paint_get; // Import paint handler
 use elements::theme::{get_settings, save_theme};
 use elements::shortcut::{add_shortcut, delete_shortcut}; 
 use base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
@@ -140,7 +142,8 @@ async fn main() -> std::io::Result<()> {
             .service(index)
             .service(note_get)
             .service(note_post)
-            .service(calculator_get) 
+            .service(calculator_get)
+            .service(paint_get) // Register paint handler
             .route("/note/delete", web::post().to(note_delete))
             .service(sql::sql_get)
             .service(sql::sql_add)
@@ -148,7 +151,7 @@ async fn main() -> std::io::Result<()> {
             .service(sql::sql_export)
             .service(sql::sql_view)
             .service(sql::sql_save) 
-            .service(sql::sql_delete) // FIX: This registers the delete handler!
+            .service(sql::sql_delete) 
             .service(Files::new("/static", "./static").prefer_utf8(true))
             .service(add_shortcut)      
             .service(delete_shortcut)   
