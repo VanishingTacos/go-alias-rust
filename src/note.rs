@@ -264,6 +264,23 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         document.body.removeChild(anchor);
     });
 
+    // Compose Email (Gmail)
+    document.getElementById('email-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        const subject = subjectInput.value.trim();
+        const body = textarea.value.trim();
+        
+        // Use encodeURIComponent to ensure special characters are handled in the URL
+        const encodedSubject = encodeURIComponent(subject);
+        const encodedBody = encodeURIComponent(body);
+        
+        // Gmail compose URL: https://mail.google.com/mail/?view=cm&fs=1&su={subject}&body={body}
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodedSubject}&body=${encodedBody}`;
+        
+        // Open in a new tab
+        window.open(gmailUrl, '_blank');
+    });
 
     // --- History Logic ---
     savedNotesList.addEventListener('click', (event) => {
@@ -423,6 +440,7 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
             <input type="text" id="subject" name="subject" placeholder="Subject / Filename" value="" class="subject-input" />
             <button type="button" id="toggle-preview-btn" class="utility-btn">Preview Markdown</button>
             <button type="button" id="download-btn" class="utility-btn">💾 Save to Disk</button>
+            <button type="button" id="email-btn" class="utility-btn">📧 Email</button>
         </div>
 
         <div class="editor-container">
@@ -445,5 +463,7 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         js = js
     );
 
+    // Use the reusable function to wrap the content with the base HTML and Nav Bar
+    // Prepend the custom style to the content
     render_base_page("Quick Notes", &format!("{}{}", style, content), current_theme)
 }

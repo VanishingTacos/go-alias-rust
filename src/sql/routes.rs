@@ -212,7 +212,6 @@ fn format_ts(seconds: i64) -> String {
     const SECONDS_IN_DAY: i64 = 86400;
     const DAYS_IN_400_YEARS: i64 = 146097;
     const DAYS_IN_100_YEARS: i64 = 36524;
-    const DAYS_IN_4_YEARS: i64 = 1461;
 
     let days_since_epoch = seconds / SECONDS_IN_DAY;
     let mut second_of_day = seconds % SECONDS_IN_DAY;
