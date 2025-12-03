@@ -1,7 +1,6 @@
-use crate::app_state::Theme; // Import Theme struct
-use std::collections::HashMap; // Needed for theme select dropdown
+use crate::app_state::Theme; 
+use std::collections::HashMap; 
 
-// Function to generate the CSS variable block for the current theme
 fn render_theme_variables(theme: &Theme) -> String {
     format!(
         r#"
@@ -18,18 +17,12 @@ fn render_theme_variables(theme: &Theme) -> String {
 }}
 </style>
 "#,
-        theme.primary_bg,
-        theme.secondary_bg,
-        theme.tertiary_bg,
-        theme.text_color,
-        theme.link_color,
-        theme.link_visited,
-        theme.link_hover,
-        theme.border_color,
+        theme.primary_bg, theme.secondary_bg, theme.tertiary_bg,
+        theme.text_color, theme.link_color, theme.link_visited,
+        theme.link_hover, theme.border_color,
     )
 }
 
-/// Generates the HTML for the reusable navigation bar, linking to all top-level tools.
 pub fn nav_bar_html() -> String {
     r#"
     <div class="tools">
@@ -38,7 +31,8 @@ pub fn nav_bar_html() -> String {
         <a href="/sql"><button class="nav-button">SQL Manager</button></a>
         <a href="/note"><button class="nav-button">Notes</button></a>
         <a href="/calculator"><button class="nav-button">Calculator</button></a>
-        <a href="/paint"><button class="nav-button">Paint</button></a> <!-- NEW: Paint Button -->
+        <a href="/paint"><button class="nav-button">Paint</button></a>
+        <a href="/request"><button class="nav-button">Requests</button></a> <!-- NEW: Requests Button -->
       </div>
       <div class="right-buttons">
         <div id="optional-button-placeholder"></div>
@@ -48,8 +42,6 @@ pub fn nav_bar_html() -> String {
     "#.to_string()
 }
 
-/// Renders the standard HTML wrapper for any page.
-/// Includes the required <head>, stylesheet, and the navigation bar.
 pub fn render_base_page(title: &str, body_content: &str, current_theme: &Theme) -> String {
     format!(
         r#"<!DOCTYPE html>
@@ -57,7 +49,7 @@ pub fn render_base_page(title: &str, body_content: &str, current_theme: &Theme) 
   <head>
     <meta charset="utf-8">
     <title>{}</title>
-    {} <!-- Inject theme variables -->
+    {} 
     <link rel="stylesheet" href="/static/style.css">
   </head>
   <body>
@@ -66,13 +58,12 @@ pub fn render_base_page(title: &str, body_content: &str, current_theme: &Theme) 
   </body>
 </html>"#,
         title,
-        render_theme_variables(current_theme), // Inject theme variables
-        nav_bar_html(), // Inject the reusable navigation bar
+        render_theme_variables(current_theme),
+        nav_bar_html(),
         body_content
     )
 }
 
-// Function to render just the Add Shortcut button
 pub fn render_add_shortcut_button() -> String {
     r#"
     <div class="add-shortcut-container">
@@ -81,7 +72,6 @@ pub fn render_add_shortcut_button() -> String {
     "#.to_string()
 }
 
-// Function to render the floating <dialog> and its JS
 pub fn render_add_shortcut_modal() -> String {
     let modal_html = r#"
 <dialog id="addShortcutModal">
@@ -108,7 +98,6 @@ pub fn render_add_shortcut_modal() -> String {
 </dialog>
 "#;
 
-    // FIX: Escaping curly braces in the JavaScript block
     let modal_js = r#"
 <script>
   document.addEventListener('DOMContentLoaded', (event) => {{
@@ -128,12 +117,10 @@ pub fn render_add_shortcut_modal() -> String {
       }}
     }}
 
-    // Close modal if user clicks on the backdrop
     if (modal) {{
         modal.addEventListener('click', (e) => {{
             if (e.target.nodeName === 'DIALOG') {{
                 const rect = e.target.getBoundingClientRect();
-                // Check if click coordinates are outside the modal content area
                 if (e.clientY < rect.top || e.clientY > rect.bottom ||
                     e.clientX < rect.left || e.clientX > rect.right) {{
                     modal.close();
@@ -149,7 +136,6 @@ pub fn render_add_shortcut_modal() -> String {
 }
 
 
-// Function to render the Theme Settings page content
 pub fn render_settings_page(current_theme: &Theme, saved_themes: &HashMap<String, Theme>) -> String {
     let theme_options: String = saved_themes.keys()
         .map(|name| {
@@ -158,7 +144,6 @@ pub fn render_settings_page(current_theme: &Theme, saved_themes: &HashMap<String
         })
         .collect();
 
-    // FIX: Ensure all JavaScript curly braces are properly escaped with double braces {{ and }}
     format!(
         r#"
     <h1>Theme Settings</h1>
@@ -180,7 +165,6 @@ pub fn render_settings_page(current_theme: &Theme, saved_themes: &HashMap<String
                     <option value="" disabled selected>--- Select to Load ---</option>
                     {theme_options}
                 </select>
-                <!-- Hidden input to carry the selected theme name for loading -->
                 <input type="hidden" id="theme_name_input" name="load_theme_name" value="">
             </div>
 
@@ -233,23 +217,20 @@ pub fn render_settings_page(current_theme: &Theme, saved_themes: &HashMap<String
             const styleElement = document.getElementById('current-theme-vars');
             const themeInputs = form.querySelectorAll('input[type="color"]');
 
-            // Function to apply colors instantly for preview
             const applyTheme = () => {{
                 let cssVars = ':root {{';
                 themeInputs.forEach(input => {{
-                    // Use standard JavaScript template literal syntax for injection
                     cssVars += `--${{input.id}}: ${{input.value}};`; 
                 }});
                 cssVars += '}}';
                 styleElement.innerHTML = cssVars;
             }};
 
-            // Event listeners for instant preview
             themeInputs.forEach(input => {{
                 input.addEventListener('input', applyTheme);
             }});
             applyBtn.addEventListener('click', (e) => {{
-                e.preventDefault(); // Prevent form submission
+                e.preventDefault(); 
                 applyTheme();
             }});
         }});

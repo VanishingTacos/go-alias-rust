@@ -164,6 +164,26 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         updateLineNumbers();
         resetSaveButton();
     });
+
+    // Re-added JSON Auto-formatting on paste
+    textarea.addEventListener("paste", function() {
+        setTimeout(() => {
+            try {
+                let val = textarea.value.trim();
+                // Attempt basic JSON pretty printing on paste
+                if (val.startsWith("{") || val.startsWith("[")) {
+                    let obj = JSON.parse(val);
+                    textarea.value = JSON.stringify(obj, null, 2);
+                } else if (val.includes("{") && val.includes(":")) {
+                    // Attempt to parse jsonish strings like {key:'val'}
+                    let jsonish = val.replace(/'/g, '"');
+                    let obj = JSON.parse(jsonish);
+                    textarea.value = JSON.stringify(obj, null, 2);
+                }
+            } catch (err) {}
+            updateLineNumbers();
+        }, 0);
+    });
     
     subjectInput.addEventListener("input", resetSaveButton);
 
@@ -275,10 +295,9 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         const encodedSubject = encodeURIComponent(subject);
         const encodedBody = encodeURIComponent(body);
         
-        // Gmail compose URL: https://mail.google.com/mail/?view=cm&fs=1&su={subject}&body={body}
+        // Gmail compose URL
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodedSubject}&body=${encodedBody}`;
         
-        // Open in a new tab
         window.open(gmailUrl, '_blank');
     });
 
@@ -357,7 +376,9 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         color: #777;
         padding: 10px 5px;
         text-align: right;
-        font-size: 0.9em;
+        font-family: monospace; /* FIX: Ensure font matches editor */
+        font-size: 1em;         /* FIX: Match editor font size exactly */
+        line-height: 1.2;       /* FIX: Match editor line height */
         user-select: none;
         overflow: hidden;
         border-right: 1px solid var(--border-color);
@@ -372,10 +393,12 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         font-family: monospace;
         font-size: 1em;
         line-height: 1.2;
+        white-space: pre; /* FIX: Prevent wrapping so lines match numbers 1:1 */
+        overflow-x: auto; /* FIX: Allow scrolling for long lines */
         resize: none;
         background-color: var(--secondary-bg);
         color: var(--text-color);
-        height: 400px; /* Fixed height for editor */
+        height: 400px; 
     }}
     
     /* Saved Notes List */

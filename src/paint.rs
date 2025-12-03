@@ -30,9 +30,9 @@ fn render_paint_page(current_theme: &Theme) -> String {
     
     .toolbar {
         display: flex;
-        gap: 15px;
+        gap: 10px;
         align-items: center;
-        padding: 10px;
+        padding: 8px;
         background-color: var(--secondary-bg);
         border: 1px solid var(--border-color);
         border-radius: 8px;
@@ -44,10 +44,11 @@ fn render_paint_page(current_theme: &Theme) -> String {
         align-items: center;
         gap: 5px;
         border-right: 1px solid var(--border-color);
-        padding-right: 15px;
+        padding-right: 10px;
     }
     .tool-group:last-child {
         border-right: none;
+        padding-right: 0;
     }
     
     .canvas-container {
@@ -67,24 +68,28 @@ fn render_paint_page(current_theme: &Theme) -> String {
 
     label {
         font-weight: bold;
-        margin-right: 5px;
+        margin-right: 3px;
         color: var(--text-color);
+        font-size: 0.9rem;
     }
 
     input[type="color"] {
         border: none;
-        width: 40px;
-        height: 40px;
+        width: 30px;
+        height: 30px;
         cursor: pointer;
         background: none;
+        padding: 0;
     }
 
     input[type="range"] {
         cursor: pointer;
+        height: 10px;
     }
     
     button {
-        padding: 8px 12px;
+        padding: 4px 8px;
+        font-size: 0.9rem;
         cursor: pointer;
         background-color: var(--tertiary-bg);
         color: var(--text-color);
@@ -99,9 +104,10 @@ fn render_paint_page(current_theme: &Theme) -> String {
     }
     
     .size-display {
-        min-width: 24px;
+        min-width: 20px;
         display: inline-block;
         text-align: center;
+        font-size: 0.9rem;
     }
 </style>
     "#;
@@ -110,6 +116,9 @@ fn render_paint_page(current_theme: &Theme) -> String {
     let html_content = r##"
     <div class="paint-app">
         <div class="toolbar">
+            <!-- Hidden file input for image loading -->
+            <input type="file" id="image-loader" accept="image/png, image/jpeg, image/jpg" style="display: none;">
+
             <div class="tool-group">
                 <label for="color">Brush:</label>
                 <input type="color" id="color" value="#ffffff">
@@ -137,7 +146,8 @@ fn render_paint_page(current_theme: &Theme) -> String {
             </div>
 
             <div class="tool-group" style="margin-left: auto;">
-                <button id="download-btn">💾 Save Image</button>
+                <button id="open-img-btn">📂 Open</button>
+                <button id="download-btn">💾 Save</button>
             </div>
         </div>
 
@@ -151,6 +161,9 @@ fn render_paint_page(current_theme: &Theme) -> String {
         const container = document.getElementById('canvas-container');
         const ctx = canvas.getContext('2d');
         
+        const imageLoader = document.getElementById('image-loader');
+        const openImgBtn = document.getElementById('open-img-btn');
+
         const colorPicker = document.getElementById('color');
         const bgColorPicker = document.getElementById('bg-color');
         
@@ -239,6 +252,53 @@ fn render_paint_page(current_theme: &Theme) -> String {
         canvas.addEventListener('mousemove', draw);
         canvas.addEventListener('mouseup', () => isDrawing = false);
         canvas.addEventListener('mouseout', () => isDrawing = false);
+
+        // --- Image Opening Logic ---
+        openImgBtn.addEventListener('click', () => {
+            imageLoader.click();
+        });
+
+        imageLoader.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    if(confirm('Load image? This will clear the current canvas.')) {
+                        // Clear with background color first
+                        fillCanvas();
+                        
+                        // Calculate scaling to fit image within canvas if it's too large
+                        let dw = img.width;
+                        let dh = img.height;
+                        
+                        // Scale down if larger than canvas
+                        const hRatio = canvas.width / img.width;
+                        const vRatio = canvas.height / img.height;
+                        const ratio  = Math.min(hRatio, vRatio);
+                        
+                        // Only scale down, don't scale up small images (unless desired)
+                        if (ratio < 1) {
+                            dw = img.width * ratio;
+                            dh = img.height * ratio;
+                        }
+                        
+                        // Center the image
+                        const dx = (canvas.width - dw) / 2;
+                        const dy = (canvas.height - dh) / 2;
+                        
+                        ctx.drawImage(img, dx, dy, dw, dh);
+                    }
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+            // Reset input value so the same file can be selected again if needed
+            imageLoader.value = '';
+        });
+
 
         // --- Controls ---
         colorPicker.addEventListener('change', (e) => {
