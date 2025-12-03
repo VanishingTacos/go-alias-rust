@@ -52,3 +52,7 @@ then
 # /paint
 
 - basic paint functionality
+
+# /request
+
+- basically a simple postman where you can save post requests if you need to
