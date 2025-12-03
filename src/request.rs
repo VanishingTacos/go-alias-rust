@@ -1,5 +1,5 @@
-use actix_web::{get, post, web::{Data, Form}, HttpResponse, Responder};
-use std::{fs, io};
+use actix_web::{get, post, web::{Data, Form, Json}, HttpResponse, Responder}; // Added Json
+use std::{fs, io, process::Command, collections::HashMap}; // Added Command, HashMap
 use serde::{Deserialize, Serialize};
 use crate::app_state::{AppState, Theme};
 use crate::base_page::render_base_page;
@@ -28,6 +28,15 @@ struct SaveRequestForm {
 #[derive(Deserialize)]
 struct DeleteRequestForm {
     name: String,
+}
+
+// NEW: Struct for the proxy request
+#[derive(Deserialize)]
+struct ProxyRequest {
+    method: String,
+    url: String,
+    headers: HashMap<String, String>,
+    body: String,
 }
 
 fn load_requests() -> Vec<SavedRequest> {
@@ -87,6 +96,46 @@ pub async fn request_delete(form: Form<DeleteRequestForm>) -> impl Responder {
     HttpResponse::Found()
         .append_header(("Location", "/request"))
         .finish()
+}
+
+// NEW: Proxy Handler to bypass CORS
+#[post("/request/run")]
+pub async fn request_run(payload: Json<ProxyRequest>) -> impl Responder {
+    // We use 'curl' here because it's built-in on Mac/Linux and robust.
+    // This avoids adding heavyweight HTTP client dependencies like reqwest to Cargo.toml.
+    let mut cmd = Command::new("curl");
+    
+    // Flags: -i (include headers in output), -s (silent), -X (method)
+    cmd.arg("-i").arg("-s").arg("-X").arg(&payload.method);
+
+    // Add Headers
+    for (key, value) in &payload.headers {
+        cmd.arg("-H").arg(format!("{}: {}", key, value));
+    }
+
+    // Add Body (if not GET/HEAD)
+    if !payload.body.is_empty() && payload.method != "GET" && payload.method != "HEAD" {
+        cmd.arg("-d").arg(&payload.body);
+    }
+
+    // URL must be last
+    cmd.arg(&payload.url);
+
+    match cmd.output() {
+        Ok(output) => {
+            // Curl returns headers and body combined due to -i
+            // We pass it back raw to the frontend to parse, or simple string.
+            let result = String::from_utf8_lossy(&output.stdout).to_string();
+            if result.is_empty() {
+                // Maybe stderr has something?
+                let err = String::from_utf8_lossy(&output.stderr).to_string();
+                HttpResponse::Ok().body(if err.is_empty() { "No response".to_string() } else { err })
+            } else {
+                HttpResponse::Ok().body(result)
+            }
+        },
+        Err(e) => HttpResponse::InternalServerError().body(format!("Failed to execute curl: {}", e)),
+    }
 }
 
 // --- Rendering ---
@@ -420,8 +469,6 @@ fn render_request_page(current_theme: &Theme) -> String {
                 if (k && v && loc === 'header') {{
                     headers[k] = v;
                 }}
-                // Query param injection would happen in URL construction, handled separately if needed, 
-                // but for simplicity we'll stick to headers for this helper.
             }}
             
             return headers;
@@ -512,7 +559,7 @@ fn render_request_page(current_theme: &Theme) -> String {
             }}
         }});
 
-        // Send Request
+        // Send Request (PROXY)
         sendBtn.addEventListener('click', async () => {{
             responseBody.innerText = 'Loading...';
             resStatus.innerText = 'Status: -';
@@ -520,17 +567,21 @@ fn render_request_page(current_theme: &Theme) -> String {
             
             const startTime = performance.now();
             
-            const options = {{
+            const payload = {{
                 method: methodSelect.value,
+                url: urlInput.value,
                 headers: constructHeaders(),
+                body: bodyInput.value
             }};
 
-            if (methodSelect.value !== 'GET' && methodSelect.value !== 'HEAD') {{
-                options.body = bodyInput.value;
-            }}
-
             try {{
-                const resp = await fetch(urlInput.value, options);
+                // Send to backend proxy to bypass CORS
+                const resp = await fetch('/request/run', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(payload)
+                }});
+                
                 const endTime = performance.now();
                 const duration = (endTime - startTime).toFixed(0);
                 
@@ -541,15 +592,12 @@ fn render_request_page(current_theme: &Theme) -> String {
                 const text = await resp.text();
                 resSize.innerText = 'Size: ' + (text.length / 1024).toFixed(2) + ' KB';
 
-                try {{
-                    const json = JSON.parse(text);
-                    responseBody.innerText = JSON.stringify(json, null, 4);
-                }} catch(e) {{
-                    responseBody.innerText = text;
-                }}
+                // Try to separate headers from body if curl -i is used (usually splits by double CRLF)
+                // For now, we just dump the whole curl output which includes headers at the top.
+                responseBody.innerText = text;
                 
             }} catch (err) {{
-                responseBody.innerText = 'Error: ' + err.message + '\\n\\nNote: CORS restrictions apply.';
+                responseBody.innerText = 'Error: ' + err.message;
                 resStatus.innerText = 'Error';
                 resStatus.className = 'status-badge error';
             }}

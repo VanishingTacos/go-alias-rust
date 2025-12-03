@@ -25,8 +25,8 @@ use app_state::AppState;
 use note::{note_get, note_post, note_delete};
 use calculator::calculator_get;
 use paint::paint_get; 
-// FIX: Import the new request handlers
-use request::{request_get, request_save, request_delete};
+// FIX: Import the new request_run handler
+use request::{request_get, request_save, request_delete, request_run};
 use elements::theme::{get_settings, save_theme};
 use elements::shortcut::{add_shortcut, delete_shortcut}; 
 use base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
@@ -147,10 +147,11 @@ async fn main() -> std::io::Result<()> {
             .service(note_post)
             .service(calculator_get)
             .service(paint_get) 
-            // Register Request Builder handlers
+            // Register Request Builder handlers including the new proxy
             .service(request_get)
             .service(request_save)
             .service(request_delete)
+            .service(request_run) // FIX: Register the proxy handler
             .route("/note/delete", web::post().to(note_delete))
             .service(sql::sql_get)
             .service(sql::sql_add)
