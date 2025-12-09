@@ -30,9 +30,10 @@ pub fn nav_bar_html() -> String {
         <a href="/"><button class="nav-button">Home (Shortcuts)</button></a>
         <a href="/sql"><button class="nav-button">SQL Manager</button></a>
         <a href="/note"><button class="nav-button">Notes</button></a>
+        <a href="/board"><button class="nav-button">Task Board</button></a> <!-- NEW BUTTON -->
         <a href="/calculator"><button class="nav-button">Calculator</button></a>
         <a href="/paint"><button class="nav-button">Paint</button></a>
-        <a href="/request"><button class="nav-button">Requests</button></a> <!-- NEW: Requests Button -->
+        <a href="/request"><button class="nav-button">Requests</button></a>
       </div>
       <div class="right-buttons">
         <div id="optional-button-placeholder"></div>

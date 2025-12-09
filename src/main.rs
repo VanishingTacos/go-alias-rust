@@ -7,6 +7,7 @@ mod elements;   // Module for elements
 mod calculator; // NEW: Module for the calculator page
 mod paint;      // NEW: Module for the paint tool
 mod request;    // NEW: Module for request builder
+mod board;      // NEW: Module for Task Board
 
 use actix_files::Files;
 use actix_web::{
@@ -25,8 +26,10 @@ use app_state::AppState;
 use note::{note_get, note_post, note_delete};
 use calculator::calculator_get;
 use paint::paint_get; 
-// FIX: Import the new request_run handler
 use request::{request_get, request_save, request_delete, request_run};
+// FIX: Import all board handlers including the new reorder handler
+use board::{board_get, board_data_get, board_add_column, board_delete_column, board_save_task, board_move_task, board_delete_task, board_reorder_columns};
+
 use elements::theme::{get_settings, save_theme};
 use elements::shortcut::{add_shortcut, delete_shortcut}; 
 use base_page::{render_base_page, render_add_shortcut_button, render_add_shortcut_modal, nav_bar_html};
@@ -147,11 +150,21 @@ async fn main() -> std::io::Result<()> {
             .service(note_post)
             .service(calculator_get)
             .service(paint_get) 
-            // Register Request Builder handlers including the new proxy
+            // Register Request Builder handlers
             .service(request_get)
             .service(request_save)
             .service(request_delete)
-            .service(request_run) // FIX: Register the proxy handler
+            .service(request_run) 
+            // Register Board handlers
+            .service(board_get)
+            .service(board_data_get)
+            .service(board_add_column)
+            .service(board_delete_column)
+            .service(board_save_task)
+            .service(board_move_task)
+            .service(board_delete_task)
+            .service(board_reorder_columns) // NEW: Register reorder handler
+            
             .route("/note/delete", web::post().to(note_delete))
             .service(sql::sql_get)
             .service(sql::sql_add)

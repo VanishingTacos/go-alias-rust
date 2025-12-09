@@ -1,5 +1,5 @@
-use actix_web::{get, post, web::{Data, Form, Json}, HttpResponse, Responder}; // Added Json
-use std::{fs, io, process::Command, collections::HashMap}; // Added Command, HashMap
+use actix_web::{get, post, web::{Data, Form, Json}, HttpResponse, Responder};
+use std::{fs, io, process::Command, collections::HashMap};
 use serde::{Deserialize, Serialize};
 use crate::app_state::{AppState, Theme};
 use crate::base_page::render_base_page;
@@ -14,6 +14,12 @@ struct SavedRequest {
     url: String,
     headers: String,
     body: String,
+    // New fields for OAuth persistence
+    auth_type: Option<String>, 
+    oauth_token_url: Option<String>,
+    oauth_client_id: Option<String>,
+    oauth_client_secret: Option<String>,
+    oauth_scope: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -23,6 +29,12 @@ struct SaveRequestForm {
     url: String,
     headers: String, 
     body: String,
+    // New fields for OAuth persistence
+    auth_type: Option<String>,
+    oauth_token_url: Option<String>,
+    oauth_client_id: Option<String>,
+    oauth_client_secret: Option<String>,
+    oauth_scope: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -30,7 +42,6 @@ struct DeleteRequestForm {
     name: String,
 }
 
-// NEW: Struct for the proxy request
 #[derive(Deserialize)]
 struct ProxyRequest {
     method: String,
@@ -70,6 +81,11 @@ pub async fn request_save(form: Form<SaveRequestForm>) -> impl Responder {
         url: form.url.clone(),
         headers: form.headers.clone(),
         body: form.body.clone(),
+        auth_type: form.auth_type.clone(),
+        oauth_token_url: form.oauth_token_url.clone(),
+        oauth_client_id: form.oauth_client_id.clone(),
+        oauth_client_secret: form.oauth_client_secret.clone(),
+        oauth_scope: form.oauth_scope.clone(),
     };
 
     if let Some(idx) = requests.iter().position(|r| r.name == new_req.name) {
@@ -98,36 +114,26 @@ pub async fn request_delete(form: Form<DeleteRequestForm>) -> impl Responder {
         .finish()
 }
 
-// NEW: Proxy Handler to bypass CORS
 #[post("/request/run")]
 pub async fn request_run(payload: Json<ProxyRequest>) -> impl Responder {
-    // We use 'curl' here because it's built-in on Mac/Linux and robust.
-    // This avoids adding heavyweight HTTP client dependencies like reqwest to Cargo.toml.
     let mut cmd = Command::new("curl");
     
-    // Flags: -i (include headers in output), -s (silent), -X (method)
     cmd.arg("-i").arg("-s").arg("-X").arg(&payload.method);
 
-    // Add Headers
     for (key, value) in &payload.headers {
         cmd.arg("-H").arg(format!("{}: {}", key, value));
     }
 
-    // Add Body (if not GET/HEAD)
     if !payload.body.is_empty() && payload.method != "GET" && payload.method != "HEAD" {
         cmd.arg("-d").arg(&payload.body);
     }
 
-    // URL must be last
     cmd.arg(&payload.url);
 
     match cmd.output() {
         Ok(output) => {
-            // Curl returns headers and body combined due to -i
-            // We pass it back raw to the frontend to parse, or simple string.
             let result = String::from_utf8_lossy(&output.stdout).to_string();
             if result.is_empty() {
-                // Maybe stderr has something?
                 let err = String::from_utf8_lossy(&output.stderr).to_string();
                 HttpResponse::Ok().body(if err.is_empty() { "No response".to_string() } else { err })
             } else {
@@ -150,6 +156,12 @@ fn render_request_page(current_theme: &Theme) -> String {
         let safe_headers = encode_minimal(&r.headers);
         let safe_body = encode_minimal(&r.body);
         
+        let auth_type = r.auth_type.as_deref().unwrap_or("none");
+        let oauth_token_url = encode_minimal(r.oauth_token_url.as_deref().unwrap_or(""));
+        let oauth_client_id = encode_minimal(r.oauth_client_id.as_deref().unwrap_or(""));
+        let oauth_client_secret = encode_minimal(r.oauth_client_secret.as_deref().unwrap_or(""));
+        let oauth_scope = encode_minimal(r.oauth_scope.as_deref().unwrap_or(""));
+
         format!(
             "<li class=\"saved-req-item\">\
                 <span class=\"req-method {}\">{}</span>\
@@ -158,24 +170,42 @@ fn render_request_page(current_theme: &Theme) -> String {
                    data-method=\"{}\" \
                    data-url=\"{}\" \
                    data-headers=\"{}\" \
-                   data-body=\"{}\">{}</a>\
+                   data-body=\"{}\" \
+                   data-auth-type=\"{}\" \
+                   data-oauth-token-url=\"{}\" \
+                   data-oauth-client-id=\"{}\" \
+                   data-oauth-client-secret=\"{}\" \
+                   data-oauth-scope=\"{}\">{}</a>\
                 <form method=\"POST\" action=\"/request/delete\" style=\"display:inline;\">\
                     <input type=\"hidden\" name=\"name\" value=\"{}\">\
                     <button type=\"submit\" class=\"delete-btn\" title=\"Delete\">x</button>\
                 </form>\
             </li>",
             r.method.to_lowercase(), r.method, 
-            safe_name, safe_method, safe_url, safe_headers, safe_body, safe_name,
+            safe_name, safe_method, safe_url, safe_headers, safe_body, 
+            auth_type, oauth_token_url, oauth_client_id, oauth_client_secret, oauth_scope,
+            safe_name,
             safe_name
         )
     }).collect::<Vec<_>>().join("\n");
 
     let style = r#"
 <style>
-    .req-container { display: flex; height: calc(100vh - 70px); }
+    /* FIX: Use explicit height calculation instead of flex-grow */
+    .req-container { display: flex; height: calc(100vh - 60px); overflow: hidden; }
     
     /* Sidebar */
-    .sidebar { width: 250px; background: var(--secondary-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: 10px; flex-shrink: 0;}
+    .sidebar { 
+        width: 250px; 
+        background: var(--secondary-bg); 
+        border-right: 1px solid var(--border-color); 
+        display: flex; 
+        flex-direction: column; 
+        padding: 10px; 
+        flex-shrink: 0;
+        height: 100%; /* Ensure it fills container */
+        box-sizing: border-box;
+    }
     .sidebar h2 { margin-top: 0; font-size: 1.2em; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
     .saved-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
     .saved-req-item { display: flex; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border-color); }
@@ -190,7 +220,7 @@ fn render_request_page(current_theme: &Theme) -> String {
     .delete-btn:hover { color: #f00; }
 
     /* Main Area */
-    .main-area { flex-grow: 1; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
+    .main-area { flex-grow: 1; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; height: 100%; box-sizing: border-box; }
     
     /* Request Bar */
     .request-bar { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -218,21 +248,29 @@ fn render_request_page(current_theme: &Theme) -> String {
     .kv-input { flex: 1; padding: 8px; background: var(--primary-bg); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; }
     .kv-remove { background: none; border: none; color: #f93e3e; font-weight: bold; cursor: pointer; padding: 0 10px; }
     .add-row-btn { width: auto; align-self: flex-start; margin-top: 5px; padding: 5px 10px; font-size: 0.9em; }
+    
+    /* Read-only key for Path Params */
+    .kv-input.key.readonly { background-color: var(--tertiary-bg); color: #aaa; }
 
     /* Auth Section */
     .auth-section { display: flex; flex-direction: column; gap: 10px; padding: 10px; background: var(--secondary-bg); border-radius: 4px; border: 1px solid var(--border-color); }
-    .auth-row { display: flex; gap: 10px; align-items: center; }
-    .auth-row label { width: 100px; }
+    .auth-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;}
+    .auth-row label { width: 120px; flex-shrink: 0;}
     .auth-row input, .auth-row select { flex: 1; padding: 8px; background: var(--primary-bg); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; }
-
+    .oauth-btn { background-color: #fca130; color: #000; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    .oauth-btn:hover { background-color: #e59029; }
+    .token-display { width: 100%; margin-top: 5px; }
 
     /* Response Area */
-    .response-section { margin-top: 20px; border-top: 2px solid var(--border-color); padding-top: 10px; display: flex; flex-direction: column; flex-grow: 1; }
+    .response-section { margin-top: 20px; border-top: 2px solid var(--border-color); padding-top: 10px; display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; }
     .response-meta { display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; color: #888; }
     .status-badge { font-weight: bold; }
     .status-badge.success { color: #49cc90; }
     .status-badge.error { color: #f93e3e; }
     
+    /* Debug Info */
+    #request-debug-info { margin-bottom: 10px; color: #888; font-family: monospace; font-size: 0.8em; white-space: pre-wrap; overflow-x: auto; display: none; background: var(--tertiary-bg); padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); }
+
     #response-body { flex-grow: 1; white-space: pre-wrap; overflow: auto; font-family: monospace; background: var(--secondary-bg); padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); }
     
     /* Save Modal */
@@ -262,7 +300,7 @@ fn render_request_page(current_theme: &Theme) -> String {
                     <option value="DELETE">DELETE</option>
                     <option value="PATCH">PATCH</option>
                 </select>
-                <input type="text" id="url" class="url-input" placeholder="Enter request URL" value="https://jsonplaceholder.typicode.com/todos/1">
+                <input type="text" id="url" class="url-input" placeholder="Enter request URL" value="">
                 <button id="send-btn" class="send-btn">Send</button>
                 <button id="toggle-save-btn" class="save-btn">Save</button>
             </div>
@@ -274,12 +312,18 @@ fn render_request_page(current_theme: &Theme) -> String {
                 <input type="hidden" name="url" id="save-url">
                 <input type="hidden" name="headers" id="save-headers">
                 <input type="hidden" name="body" id="save-body">
+                <input type="hidden" name="auth_type" id="save-auth-type">
+                <input type="hidden" name="oauth_token_url" id="save-oauth-token-url">
+                <input type="hidden" name="oauth_client_id" id="save-oauth-client-id">
+                <input type="hidden" name="oauth_client_secret" id="save-oauth-client-secret">
+                <input type="hidden" name="oauth_scope" id="save-oauth-scope">
                 <button type="submit" class="save-btn">Confirm Save</button>
             </form>
             
             <!-- Input Tabs -->
             <div class="tabs">
                 <div class="tab active" onclick="openTab('tab-params')">Params</div>
+                <div class="tab" onclick="openTab('tab-path')">Path Variables</div> <!-- NEW TAB -->
                 <div class="tab" onclick="openTab('tab-auth')">Auth</div>
                 <div class="tab" onclick="openTab('tab-headers')">Headers</div>
                 <div class="tab" onclick="openTab('tab-body')">Body</div>
@@ -294,6 +338,12 @@ fn render_request_page(current_theme: &Theme) -> String {
                 <button class="save-btn add-row-btn" onclick="addKvRow('params-container')">+ Add Param</button>
             </div>
 
+            <!-- Path Tab (NEW) -->
+            <div id="tab-path" class="tab-content">
+                <p style="font-size:0.8em; color:#888; margin:0;">Path Variables (Auto-detected from URL like {{id}})</p>
+                <div id="path-container"></div>
+            </div>
+
             <!-- Auth Tab -->
             <div id="tab-auth" class="tab-content">
                 <div class="auth-section">
@@ -304,20 +354,17 @@ fn render_request_page(current_theme: &Theme) -> String {
                             <option value="bearer">Bearer Token</option>
                             <option value="basic">Basic Auth</option>
                             <option value="apikey">API Key</option>
+                            <option value="oauth2">OAuth 2.0</option> <!-- NEW -->
                         </select>
                     </div>
-                    <div id="auth-inputs">
-                        <!-- Dynamic Inputs based on type -->
-                    </div>
+                    <div id="auth-inputs"></div>
                 </div>
             </div>
             
             <!-- Headers Tab -->
             <div id="tab-headers" class="tab-content">
                 <p style="font-size:0.8em; color:#888; margin:0;">HTTP Headers</p>
-                <div id="headers-container">
-                     <!-- Dynamic Rows -->
-                </div>
+                <div id="headers-container"></div>
                 <button class="save-btn add-row-btn" onclick="addKvRow('headers-container')">+ Add Header</button>
             </div>
             
@@ -330,7 +377,13 @@ fn render_request_page(current_theme: &Theme) -> String {
             
             <!-- Response -->
             <div class="response-section">
-                <h3>Response</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3>Response</h3>
+                    <button id="download-res-btn" class="save-btn" style="padding:5px 10px; font-size:0.8em;">Download JSON</button>
+                </div>
+                <!-- NEW: Debug CURL output -->
+                <div id="request-debug-info"></div>
+
                 <div class="response-meta">
                     <span id="res-status">Status: -</span>
                     <span id="res-time">Time: - ms</span>
@@ -350,6 +403,8 @@ fn render_request_page(current_theme: &Theme) -> String {
         const resStatus = document.getElementById('res-status');
         const resTime = document.getElementById('res-time');
         const resSize = document.getElementById('res-size');
+        const downloadResBtn = document.getElementById('download-res-btn');
+        const requestDebugInfo = document.getElementById('request-debug-info');
         
         // Save Logic Elements
         const toggleSaveBtn = document.getElementById('toggle-save-btn');
@@ -358,20 +413,31 @@ fn render_request_page(current_theme: &Theme) -> String {
         const saveUrl = document.getElementById('save-url');
         const saveHeaders = document.getElementById('save-headers');
         const saveBody = document.getElementById('save-body');
+        const saveAuthType = document.getElementById('save-auth-type');
+        const saveOAuthTokenUrl = document.getElementById('save-oauth-token-url');
+        const saveOAuthClientId = document.getElementById('save-oauth-client-id');
+        const saveOAuthClientSecret = document.getElementById('save-oauth-client-secret');
+        const saveOAuthScope = document.getElementById('save-oauth-scope');
 
         // Auth Elements
         const authTypeSelect = document.getElementById('auth-type');
         const authInputs = document.getElementById('auth-inputs');
+        let fetchedOAuthToken = ''; // Store the token here
 
         // --- Helper: Create Key-Value Row ---
-        function addKvRow(containerId, key = '', val = '') {{
+        function addKvRow(containerId, key = '', val = '', isReadOnlyKey = false) {{
             const container = document.getElementById(containerId);
             const row = document.createElement('div');
             row.className = 'kv-row';
+            // Only add remove button if not readonly (Path vars are readonly keys)
+            const removeBtn = isReadOnlyKey ? '' : `<button class="kv-remove" onclick="this.parentElement.remove(); onKvChange('${{containerId}}')">x</button>`;
+            const readOnlyAttr = isReadOnlyKey ? 'readonly' : '';
+            const keyClass = isReadOnlyKey ? 'kv-input key readonly' : 'kv-input key';
+            
             row.innerHTML = `
-                <input type="text" class="kv-input key" placeholder="Key" value="${{key}}" oninput="onKvChange('${{containerId}}')">
+                <input type="text" class="${{keyClass}}" placeholder="Key" value="${{key}}" ${{readOnlyAttr}} oninput="onKvChange('${{containerId}}')">
                 <input type="text" class="kv-input val" placeholder="Value" value="${{val}}" oninput="onKvChange('${{containerId}}')">
-                <button class="kv-remove" onclick="this.parentElement.remove(); onKvChange('${{containerId}}')">x</button>
+                ${{removeBtn}}
             `;
             container.appendChild(row);
         }}
@@ -397,7 +463,8 @@ fn render_request_page(current_theme: &Theme) -> String {
 
         function updateUrlFromParams() {{
             try {{
-                const baseUrl = urlInput.value.split('?')[0];
+                const parts = urlInput.value.split('?');
+                const baseUrl = parts[0];
                 const params = getKvMap('params-container');
                 const queryString = new URLSearchParams(params).toString();
                 if (queryString) {{
@@ -405,36 +472,73 @@ fn render_request_page(current_theme: &Theme) -> String {
                 }} else {{
                     urlInput.value = baseUrl;
                 }}
+                // Trigger path update check in case URL structure changed (unlikely but safe)
+                detectPathVariables();
             }} catch(e) {{}}
         }}
 
         // --- Logic: Sync URL to Params (Reverse Sync) ---
         function parseUrlToParams() {{
             try {{
-                const urlObj = new URL(urlInput.value);
+                // Hacky way to handle relative URLs or just paths
+                let urlStr = urlInput.value;
+                if (!urlStr.startsWith('http')) urlStr = 'http://placeholder.com' + (urlStr.startsWith('/') ? '' : '/') + urlStr;
+                
+                const urlObj = new URL(urlStr);
                 const container = document.getElementById('params-container');
-                container.innerHTML = ''; // Clear existing
+                container.innerHTML = ''; 
                 urlObj.searchParams.forEach((val, key) => {{
                     addKvRow('params-container', key, val);
                 }});
-                // Add one empty row
-                addKvRow('params-container');
-            }} catch (e) {{
-                // Invalid URL, maybe relative or empty, ignore
+                addKvRow('params-container'); // Empty row
+            }} catch (e) {{}}
+        }}
+
+        // --- Logic: Path Variables Detection ---
+        function detectPathVariables() {{
+            const url = urlInput.value;
+            const regex = /\{{([^}}]+)\}}/g;
+            let match;
+            const foundKeys = new Set();
+            
+            // Extract keys
+            while ((match = regex.exec(url)) !== null) {{
+                foundKeys.add(match[1]);
             }}
+
+            const container = document.getElementById('path-container');
+            // Capture existing values to preserve them
+            const currentValues = getKvMap('path-container');
+            container.innerHTML = '';
+
+            if (foundKeys.size === 0) {{
+                container.innerHTML = '<p style="padding:10px; color:#888;">No path variables detected in URL.</p>';
+                return;
+            }}
+
+            foundKeys.forEach(key => {{
+                const val = currentValues[key] || '';
+                addKvRow('path-container', key, val, true);
+            }});
         }}
         
-        urlInput.addEventListener('input', parseUrlToParams);
-        urlInput.addEventListener('change', parseUrlToParams);
+        // URL Input Listener
+        urlInput.addEventListener('input', () => {{
+            parseUrlToParams();
+            detectPathVariables();
+        }});
 
         // --- Logic: Auth UI ---
-        authTypeSelect.addEventListener('change', renderAuthInputs);
+        authTypeSelect.addEventListener('change', () => renderAuthInputs());
 
-        function renderAuthInputs() {{
+        function renderAuthInputs(savedData = null) {{
             const type = authTypeSelect.value;
             let html = '';
+            // Helper to get value securely
+            const val = (key) => savedData ? (savedData[key] || '') : '';
+
             if (type === 'bearer') {{
-                html = `<div class="auth-row"><label>Token</label><input type="text" id="auth-bearer-token" placeholder="Bearer Token"></div>`;
+                html = `<div class="auth-row"><label>Token</label><input type="text" id="auth-bearer-token" placeholder="Bearer Token" value="${{fetchedOAuthToken}}"></div>`;
             }} else if (type === 'basic') {{
                 html = `
                     <div class="auth-row"><label>Username</label><input type="text" id="auth-basic-user"></div>
@@ -444,10 +548,104 @@ fn render_request_page(current_theme: &Theme) -> String {
                 html = `
                     <div class="auth-row"><label>Key</label><input type="text" id="auth-api-key" placeholder="Key Name (e.g. X-API-Key)"></div>
                     <div class="auth-row"><label>Value</label><input type="text" id="auth-api-val" placeholder="Key Value"></div>
-                    <div class="auth-row"><label>Add To</label><select id="auth-api-loc"><option value="header">Header</option><option value="query">Query Params</option></select></div>
+                    <div class="auth-row"><label>Add To</label><select id="auth-api-loc"><option value="header">Header</option></select></div>
+                `;
+            }} else if (type === 'oauth2') {{
+                html = `
+                    <div class="auth-row"><label>Token URL</label><input type="text" id="oauth-token-url" value="${{val('oauth_token_url')}}"></div>
+                    <div class="auth-row"><label>Client ID</label><input type="text" id="oauth-client-id" value="${{val('oauth_client_id')}}"></div>
+                    <div class="auth-row"><label>Client Secret</label><input type="password" id="oauth-client-secret" value="${{val('oauth_client_secret')}}"></div>
+                    <div class="auth-row"><label>Scope</label><input type="text" id="oauth-scope" value="${{val('oauth_scope')}}"></div>
+                    <div class="auth-row">
+                        <button type="button" class="oauth-btn" onclick="fetchOAuthToken()">Get New Access Token</button>
+                    </div>
+                    <div class="auth-row" id="oauth-status-row" style="display:none; flex-direction:column; align-items:flex-start;">
+                         <label>Current Token</label>
+                         <div class="token-display" id="oauth-token-display"></div>
+                    </div>
                 `;
             }}
             authInputs.innerHTML = html;
+        }}
+        
+        async function fetchOAuthToken() {{
+            const tokenUrl = document.getElementById('oauth-token-url').value;
+            const clientId = document.getElementById('oauth-client-id').value;
+            const clientSecret = document.getElementById('oauth-client-secret').value;
+            const scope = document.getElementById('oauth-scope').value;
+            const display = document.getElementById('oauth-token-display');
+            const statusRow = document.getElementById('oauth-status-row');
+            
+            display.innerText = "Fetching...";
+            statusRow.style.display = 'flex';
+            
+            // Construct JSON payload for this specific API structure
+            const payload = {{
+                clientId: clientId,
+                clientSecret: clientSecret,
+                scopes: [scope], // Using array format as requested
+                grant_type: 'client_credentials'
+            }};
+            
+             // Create CURL debug command string
+            const debugCurl = `curl -X POST "${{tokenUrl}}" \\\n  -H "Content-Type: application/json" \\\n  -d '${{JSON.stringify(payload)}}'`;
+
+            // Display debug info immediately
+            display.innerHTML = `<div style="white-space: pre-wrap; margin-bottom: 10px; color: #888; border-bottom: 1px solid #444; padding-bottom: 5px; font-size: 0.8em; overflow-x: auto;">${{debugCurl}}</div><div id="token-status-msg">Fetching...</div>`;
+            
+            try {{
+                const resp = await fetch('/request/run', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        method: 'POST',
+                        url: tokenUrl,
+                        headers: {{ 'Content-Type': 'application/json' }}, // Using JSON content type
+                        body: JSON.stringify(payload)
+                    }})
+                }});
+                
+                const text = await resp.text();
+                // Robust parsing of curl output (splitting headers/body by double newlines)
+                const parts = text.split(/(?:\r\n\r\n|\n\n)/g); 
+                const jsonStr = parts.length > 1 ? parts[parts.length - 1] : text;
+                const cleanJson = jsonStr.trim();
+                
+                const msgDiv = document.getElementById('token-status-msg');
+
+                try {{
+                    const data = JSON.parse(cleanJson);
+                    if (data.access_token) {{
+                        fetchedOAuthToken = data.access_token;
+                        // NEW: Show token in an input field with a copy button
+                        msgDiv.innerHTML = `
+                            <div style="color: #49cc90; margin-bottom: 5px;">Token received!</div>
+                            <div style="display:flex; gap:5px; width:100%; margin-top:5px;">
+                                <input type="text" id="token-input-field" value="${{fetchedOAuthToken}}" readonly style="flex-grow:1; padding:5px; background:var(--primary-bg); color:var(--text-color); border:1px solid var(--border-color); border-radius:4px;">
+                                <button type="button" class="save-btn" onclick="copyToClipboard('token-input-field')" style="padding:5px 10px;">Copy</button>
+                            </div>
+                        `;
+                    }} else {{
+                        msgDiv.innerText = "Error: No access_token in response.";
+                        console.error(data);
+                    }}
+                }} catch(e) {{
+                    msgDiv.innerText = "Error parsing response JSON.";
+                    console.error("Parse error:", e);
+                    console.log("Raw text:", text);
+                }}
+                
+            }} catch (e) {{
+                 const msgDiv = document.getElementById('token-status-msg');
+                 if(msgDiv) msgDiv.innerText = "Error: " + e.message;
+            }}
+        }}
+
+        function copyToClipboard(elementId) {{
+            const copyText = document.getElementById(elementId);
+            copyText.select();
+            copyText.setSelectionRange(0, 99999);
+            document.execCommand("copy");
         }}
 
         // --- Logic: Construct Final Headers ---
@@ -465,9 +663,10 @@ fn render_request_page(current_theme: &Theme) -> String {
             }} else if (authType === 'apikey') {{
                 const k = document.getElementById('auth-api-key')?.value;
                 const v = document.getElementById('auth-api-val')?.value;
-                const loc = document.getElementById('auth-api-loc')?.value;
-                if (k && v && loc === 'header') {{
-                    headers[k] = v;
+                if (k && v) headers[k] = v;
+            }} else if (authType === 'oauth2') {{
+                if (fetchedOAuthToken) {{
+                    headers['Authorization'] = `Bearer ${{fetchedOAuthToken}}`;
                 }}
             }}
             
@@ -476,7 +675,7 @@ fn render_request_page(current_theme: &Theme) -> String {
 
         // --- Logic: Stringify Headers for Saving ---
         function headersToString() {{
-            const h = constructHeaders(); // Includes Auth
+            const h = constructHeaders();
             return Object.entries(h).map(([k, v]) => `${{k}}: ${{v}}`).join('\\n');
         }}
         
@@ -494,7 +693,7 @@ fn render_request_page(current_theme: &Theme) -> String {
                     addKvRow('headers-container', key, val);
                 }}
             }});
-            addKvRow('headers-container'); // Add empty row at end
+            addKvRow('headers-container'); 
         }}
 
         // --- Tabs ---
@@ -508,15 +707,18 @@ fn render_request_page(current_theme: &Theme) -> String {
             }}
         }}
         
-        // Initialize default state
+        // Initialize
         window.addKvRow = addKvRow;
         window.openTab = openTab;
         window.onKvChange = onKvChange;
+        window.fetchOAuthToken = fetchOAuthToken; // Make global
+        window.copyToClipboard = copyToClipboard;
         
         // Initial rows
         addKvRow('params-container');
         addKvRow('headers-container', 'Content-Type', 'application/json');
         parseUrlToParams();
+        detectPathVariables(); // Run detection on load
 
         // Toggle Save Form
         toggleSaveBtn.addEventListener('click', () => {{
@@ -530,8 +732,16 @@ fn render_request_page(current_theme: &Theme) -> String {
         saveControls.addEventListener('submit', () => {{
             saveMethod.value = methodSelect.value;
             saveUrl.value = urlInput.value;
-            saveHeaders.value = headersToString(); // Save constructed headers string
+            saveHeaders.value = headersToString(); 
             saveBody.value = bodyInput.value;
+            saveAuthType.value = authTypeSelect.value;
+            
+            if (authTypeSelect.value === 'oauth2') {{
+                saveOAuthTokenUrl.value = document.getElementById('oauth-token-url')?.value || '';
+                saveOAuthClientId.value = document.getElementById('oauth-client-id')?.value || '';
+                saveOAuthClientSecret.value = document.getElementById('oauth-client-secret')?.value || '';
+                saveOAuthScope.value = document.getElementById('oauth-scope')?.value || '';
+            }}
         }});
 
         // Load Saved Request
@@ -541,11 +751,24 @@ fn render_request_page(current_theme: &Theme) -> String {
                 e.preventDefault();
                 methodSelect.value = link.dataset.method;
                 urlInput.value = link.dataset.url;
-                // Populate Headers Table
                 stringToHeadersTable(link.dataset.headers);
                 bodyInput.value = link.dataset.body;
                 document.getElementById('req-name').value = link.dataset.name; 
-                parseUrlToParams(); // Refresh params from new URL
+                
+                // Auth loading
+                authTypeSelect.value = link.dataset.authType || 'none';
+                
+                // Construct object from dataset for renderAuthInputs
+                const savedAuthData = {{
+                    oauth_token_url: link.dataset.oauthTokenUrl,
+                    oauth_client_id: link.dataset.oauthClientId,
+                    oauth_client_secret: link.dataset.oauthClientSecret,
+                    oauth_scope: link.dataset.oauthScope
+                }};
+                renderAuthInputs(savedAuthData);
+
+                parseUrlToParams(); 
+                detectPathVariables();
             }}
         }});
 
@@ -559,27 +782,56 @@ fn render_request_page(current_theme: &Theme) -> String {
             }}
         }});
 
-        // Send Request (PROXY)
+        // Send Request
         sendBtn.addEventListener('click', async () => {{
             responseBody.innerText = 'Loading...';
             resStatus.innerText = 'Status: -';
             resTime.innerText = 'Time: -';
+            requestDebugInfo.innerHTML = ''; // Clear old debug info
             
             const startTime = performance.now();
             
-            const payload = {{
+            // 1. Substitute Path Variables
+            let finalUrl = urlInput.value;
+            const pathMap = getKvMap('path-container');
+            for (const [key, val] of Object.entries(pathMap)) {{
+                finalUrl = finalUrl.replace(`{{${{key}}}}`, val);
+            }}
+
+            const headers = constructHeaders();
+            const body = bodyInput.value;
+
+            const options = {{
                 method: methodSelect.value,
-                url: urlInput.value,
-                headers: constructHeaders(),
-                body: bodyInput.value
+                url: finalUrl, // Use substituted URL
+                headers: headers,
+                body: ''
             }};
 
+            // NEW: Build the curl command for display
+            let curlCmd = `curl -X ${{methodSelect.value}} "${{finalUrl}}"`;
+            for (const [key, val] of Object.entries(headers)) {{
+                curlCmd += ` \\\n  -H "${{key}}: ${{val}}"`;
+            }}
+            
+            if (methodSelect.value !== 'GET' && methodSelect.value !== 'HEAD') {{
+                options.body = body;
+                if (body) {{
+                    // Simple escape for single quotes for display purposes
+                    const safeBody = body.replace(/'/g, "'\\''");
+                    curlCmd += ` \\\n  -d '${{safeBody}}'`;
+                }}
+            }}
+            
+            // Display the debug info
+            requestDebugInfo.style.display = 'block';
+            requestDebugInfo.innerText = curlCmd;
+
             try {{
-                // Send to backend proxy to bypass CORS
                 const resp = await fetch('/request/run', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(options)
                 }});
                 
                 const endTime = performance.now();
@@ -592,15 +844,35 @@ fn render_request_page(current_theme: &Theme) -> String {
                 const text = await resp.text();
                 resSize.innerText = 'Size: ' + (text.length / 1024).toFixed(2) + ' KB';
 
-                // Try to separate headers from body if curl -i is used (usually splits by double CRLF)
-                // For now, we just dump the whole curl output which includes headers at the top.
-                responseBody.innerText = text;
+                // Try to strip headers from curl output if -i is used
+                const parts = text.split(/(?:\r\n\r\n|\n\n)/g); 
+                const bodyText = parts.length > 1 ? parts[parts.length - 1] : text;
+
+                try {{
+                    const json = JSON.parse(bodyText);
+                    responseBody.innerText = JSON.stringify(json, null, 4);
+                }} catch(e) {{
+                    responseBody.innerText = bodyText;
+                }}
                 
             }} catch (err) {{
                 responseBody.innerText = 'Error: ' + err.message;
                 resStatus.innerText = 'Error';
                 resStatus.className = 'status-badge error';
             }}
+        }});
+        
+        // NEW: Download Response as JSON
+        downloadResBtn.addEventListener('click', () => {{
+            const content = responseBody.innerText;
+            if (!content) return;
+            
+            const blob = new Blob([content], {{ type: 'application/json' }});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'response.json';
+            link.click();
+            URL.revokeObjectURL(link.href);
         }});
     </script>
     "#, saved_list = saved_list_html);
