@@ -85,6 +85,7 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>, current_theme: &Theme
     let content = format!(
         r#"
     <h1>404 – Shortcut Not Found</h1>
+    <p>The requested shortcut was not found. Here are your available shortcuts:</p>
     {}
     "#,
         table
@@ -99,30 +100,57 @@ pub fn not_found_page(shortcuts: &HashMap<String, String>, current_theme: &Theme
 }
 
 /// Catch‑all route for shortcuts
-#[get("/{path}")]
+/// Updated to capture the full path (including slashes) using {tail:.*}
+#[get("/{tail:.*}")]
 // FIX: Made function public for external use (E0603)
 pub async fn go(path: web::Path<String>, state: Data<Arc<AppState>>) -> impl Responder {
+    // The path here captures everything after the domain, e.g. "youtube/omegagiven"
+    let req_path = path.into_inner();
+    
     // Lock mutexes to read
     let shortcuts = state.shortcuts.lock().unwrap();
     let hidden_shortcuts = state.hidden_shortcuts.lock().unwrap();
     let work_shortcuts = state.work_shortcuts.lock().unwrap(); 
     let current_theme = state.current_theme.lock().unwrap(); // Get current theme
 
-    // Check all three maps for the shortcut
-    if let Some(url) = shortcuts.get(path.as_str())
-        .or_else(|| hidden_shortcuts.get(path.as_str()))
-        .or_else(|| work_shortcuts.get(path.as_str()))
-    {
-        HttpResponse::Found()
-            .append_header(("Location", url.clone()))
-            .finish()
-    } else {
-        // Combine all *visible* shortcuts for display on the 404 page
-        let mut combined_shortcuts = shortcuts.clone();
-        combined_shortcuts.extend(work_shortcuts.clone());
+    // Helper to find a URL in any of the maps
+    let find_url = |key: &str| -> Option<String> {
+        shortcuts.get(key)
+            .or_else(|| hidden_shortcuts.get(key))
+            .or_else(|| work_shortcuts.get(key))
+            .cloned()
+    };
 
-        HttpResponse::NotFound()
-            .content_type("text/html; charset=utf-8")
-            .body(not_found_page(&combined_shortcuts, &current_theme)) 
+    // 1. Exact Match: Check if the full path is a defined shortcut
+    if let Some(url) = find_url(&req_path) {
+        return HttpResponse::Found()
+            .append_header(("Location", url))
+            .finish();
     }
+
+    // 2. Smart Append: Check if the first segment is a shortcut (e.g. "youtube/omegagiven")
+    // This splits "youtube/omegagiven" into "youtube" and "omegagiven"
+    if let Some((alias, remainder)) = req_path.split_once('/') {
+        if let Some(base_url) = find_url(alias) {
+            // If the base URL ends with '/', just append. Otherwise add '/' then append.
+            let new_url = if base_url.ends_with('/') {
+                format!("{}{}", base_url, remainder)
+            } else {
+                format!("{}/{}", base_url, remainder)
+            };
+            
+            return HttpResponse::Found()
+                .append_header(("Location", new_url))
+                .finish();
+        }
+    }
+
+    // 3. Not Found
+    // Combine all *visible* shortcuts for display on the 404 page
+    let mut combined_shortcuts = shortcuts.clone();
+    combined_shortcuts.extend(work_shortcuts.clone());
+
+    HttpResponse::NotFound()
+        .content_type("text/html; charset=utf-8")
+        .body(not_found_page(&combined_shortcuts, &current_theme)) 
 }
