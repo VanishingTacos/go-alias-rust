@@ -148,6 +148,8 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
 
     function updateLineNumbers() {
         const lines = textarea.value.split("\n").length;
+        // Optimization: Don't rebuild DOM if line count hasn't changed drastically?
+        // For simplicity, we rebuild.
         lineNumbers.innerHTML = "";
         for (let i = 1; i <= lines; i++) {
             const div = document.createElement("div");
@@ -165,24 +167,23 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         resetSaveButton();
     });
 
-    // Re-added JSON Auto-formatting on paste
+    // JSON Auto-formatting on paste
     textarea.addEventListener("paste", function() {
         setTimeout(() => {
             try {
                 let val = textarea.value.trim();
-                // Attempt basic JSON pretty printing on paste
                 if (val.startsWith("{") || val.startsWith("[")) {
                     let obj = JSON.parse(val);
                     textarea.value = JSON.stringify(obj, null, 2);
                 } else if (val.includes("{") && val.includes(":")) {
-                    // Attempt to parse jsonish strings like {key:'val'}
                     let jsonish = val.replace(/'/g, '"');
                     let obj = JSON.parse(jsonish);
                     textarea.value = JSON.stringify(obj, null, 2);
                 }
             } catch (err) {}
+            // Force update after formatting
             updateLineNumbers();
-        }, 0);
+        }, 10);
     });
     
     subjectInput.addEventListener("input", resetSaveButton);
@@ -193,9 +194,8 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         }
     }
 
-    // --- Basic Markdown Parser (Client-side) ---
+    // --- Basic Markdown Parser ---
     function renderMarkdown(text) {
-        // Simple regex-based parser for basic MD support
         let html = text
             .replace(/^# (.*$)/gim, '<h1>$1</h1>')
             .replace(/^## (.*$)/gim, '<h2>$1</h2>')
@@ -211,12 +211,9 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
     }
 
     // --- Button Handlers ---
-
-    // Toggle Markdown Preview
     togglePreviewBtn.addEventListener('click', (e) => {
-        e.preventDefault(); // Prevent form submit
+        e.preventDefault(); 
         isPreview = !isPreview;
-        
         if (isPreview) {
             previewContainer.innerHTML = renderMarkdown(textarea.value);
             editorContainer.style.display = 'none';
@@ -229,7 +226,6 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         }
     });
 
-    // Open Local File
     document.getElementById('open-file-btn').addEventListener('click', (e) => {
         e.preventDefault();
         fileInput.click();
@@ -238,41 +234,26 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
     fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = (e) => {
             textarea.value = e.target.result;
-            subjectInput.value = file.name; // Set subject as filename
+            subjectInput.value = file.name;
             updateLineNumbers();
             resetSaveButton();
-            
-            // If currently previewing, update preview
             if(isPreview) {
                  previewContainer.innerHTML = renderMarkdown(textarea.value);
             }
         };
         reader.readAsText(file);
-        // Reset input so same file can be selected again if needed
         fileInput.value = '';
     });
 
-    // Save/Download as File
     document.getElementById('download-btn').addEventListener('click', (e) => {
         e.preventDefault();
         const text = textarea.value;
-        if (!text) {
-            alert("Note is empty!");
-            return;
-        }
-        
-        let name = subjectInput.value.trim();
-        if (!name) name = 'note.txt';
-        
-        // Ensure extension if missing
-        if (!name.includes('.')) {
-            name += '.txt';
-        }
-
+        if (!text) { alert("Note is empty!"); return; }
+        let name = subjectInput.value.trim() || 'note.txt';
+        if (!name.includes('.')) name += '.txt';
         const blob = new Blob([text], { type: 'text/plain' });
         const anchor = document.createElement('a');
         anchor.download = name;
@@ -284,37 +265,25 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         document.body.removeChild(anchor);
     });
 
-    // Compose Email (Gmail)
     document.getElementById('email-btn').addEventListener('click', (e) => {
         e.preventDefault();
-        
         const subject = subjectInput.value.trim();
         const body = textarea.value.trim();
-        
-        // Use encodeURIComponent to ensure special characters are handled in the URL
         const encodedSubject = encodeURIComponent(subject);
         const encodedBody = encodeURIComponent(body);
-        
-        // Gmail compose URL
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodedSubject}&body=${encodedBody}`;
-        
         window.open(gmailUrl, '_blank');
     });
 
-    // --- History Logic ---
     savedNotesList.addEventListener('click', (event) => {
         const span = event.target.closest('.saved-note');
         if (span) {
             const subject = span.getAttribute('data-subject');
             const content = span.getAttribute('data-content');
-            
             subjectInput.value = subject;
             textarea.value = content;
-            
             updateLineNumbers();
             saveButton.textContent = "Update Note: " + subject;
-            
-            // If previewing, update preview immediately
             if (isPreview) {
                 previewContainer.innerHTML = renderMarkdown(content);
             } else {
@@ -352,11 +321,52 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         border-radius: 4px;
         overflow: hidden;
         margin-bottom: 15px;
-        min-height: 400px;
+        height: 500px; /* Fixed height for scroll sync reliability */
     }}
-    /* Markdown Preview Styles */
+    
+    /* Common font settings to ensure alignment */
+    .editor-font {{
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 21px; /* Explicit line height in px */
+    }}
+
+    .line-numbers {{
+        background-color: var(--tertiary-bg);
+        color: #777;
+        padding: 10px 5px;
+        text-align: right;
+        user-select: none;
+        overflow: hidden;
+        border-right: 1px solid var(--border-color);
+        flex-shrink: 0;
+        min-width: 35px;
+        box-sizing: border-box;
+    }}
+    
+    /* Apply common font class */
+    .line-numbers, #editor {{
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 21px; 
+    }}
+
+    #editor {{
+        flex-grow: 1;
+        border: none;
+        outline: none;
+        padding: 10px; /* Matches line-numbers padding-top */
+        white-space: pre; /* Prevent wrapping to keep lines 1:1 with numbers */
+        overflow: auto; /* Both X and Y scroll */
+        resize: none;
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+        box-sizing: border-box;
+    }}
+    
+    /* Markdown Preview */
     #markdown-preview {{
-        display: none; /* Hidden by default */
+        display: none;
         border: 1px solid var(--border-color);
         border-radius: 4px;
         padding: 20px;
@@ -370,36 +380,6 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
     #markdown-preview code {{ background: #444; padding: 2px 5px; border-radius: 3px; }}
     #markdown-preview pre {{ background: #333; padding: 10px; border-radius: 5px; overflow-x: auto; }}
     #markdown-preview blockquote {{ border-left: 3px solid var(--link-color); margin-left: 0; padding-left: 10px; color: #aaa; }}
-
-    .line-numbers {{
-        background-color: var(--tertiary-bg);
-        color: #777;
-        padding: 10px 5px;
-        text-align: right;
-        font-family: monospace; /* FIX: Ensure font matches editor */
-        font-size: 1em;         /* FIX: Match editor font size exactly */
-        line-height: 1.2;       /* FIX: Match editor line height */
-        user-select: none;
-        overflow: hidden;
-        border-right: 1px solid var(--border-color);
-        flex-shrink: 0;
-        min-width: 30px;
-    }}
-    #editor {{
-        flex-grow: 1;
-        border: none;
-        outline: none;
-        padding: 10px;
-        font-family: monospace;
-        font-size: 1em;
-        line-height: 1.2;
-        white-space: pre; /* FIX: Prevent wrapping so lines match numbers 1:1 */
-        overflow-x: auto; /* FIX: Allow scrolling for long lines */
-        resize: none;
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-        height: 400px; 
-    }}
     
     /* Saved Notes List */
     .saved-note-item {{
@@ -434,14 +414,14 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         border-top-right-radius: 4px;
         border-bottom-right-radius: 4px;
         line-height: 1;
-        margin-top: 0; /* Override default button margin */
+        margin-top: 0;
     }}
     .delete-button:hover {{ background-color: #e00000; color: white; }}
     .saved-note-item::marker {{ content: ""; }}
     
     /* Utility Buttons */
     .utility-btn {{
-        margin-top: 0; /* Reset default */
+        margin-top: 0;
         margin-right: 5px;
         background-color: var(--tertiary-bg);
         border: 1px solid var(--border-color);
@@ -456,9 +436,7 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
     <h1>Quick Notes & Markdown Editor</h1>
     <form method="POST" action="/note">
         <div class="toolbar">
-            <!-- Hidden file input for opening files -->
             <input type="file" id="file-input" style="display: none;" accept=".txt,.md,.json,.rs,.js,.html">
-            
             <button type="button" id="open-file-btn" class="utility-btn">📂 Open File</button>
             <input type="text" id="subject" name="subject" placeholder="Subject / Filename" value="" class="subject-input" />
             <button type="button" id="toggle-preview-btn" class="utility-btn">Preview Markdown</button>
@@ -468,7 +446,7 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
 
         <div class="editor-container">
             <div class="line-numbers" id="line-numbers"></div>
-            <textarea id="editor" name="content" placeholder="Type here or drop a file..."></textarea>
+            <textarea id="editor" name="content" placeholder="Type here or drop a file..." spellcheck="false"></textarea>
         </div>
         
         <div id="markdown-preview"></div>
@@ -486,7 +464,5 @@ fn render_note_page(notes: &[Note], current_theme: &Theme) -> String {
         js = js
     );
 
-    // Use the reusable function to wrap the content with the base HTML and Nav Bar
-    // Prepend the custom style to the content
     render_base_page("Quick Notes", &format!("{}{}", style, content), current_theme)
 }
